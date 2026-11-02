@@ -220,7 +220,7 @@ export const RBAC_PAGES: RbacPage[] = [
     id: 'spare_loan_check',
     permission: 'page_spare_loan_check',
     path: '/report/spare-loan-check',
-    label: 'Spare Loan Check',
+    label: 'Spare Loan Check against Cancelled Calls',
     description: 'Upload SAP HTML and highlight SO/vendor mismatches and cancelled/transferred calls',
     group: 'Reports',
     navSection: 'CRM + SAP',

@@ -565,7 +565,7 @@ export default function SpareLoanCheckPageClient() {
 
   return (
     <PageShell
-      title="Spare Loan Check "
+      title="Spare Loan Check against Cancelled Calls "
       subtitle={subtitle}
       toolbar={
         <div className="register-filter-bar register-filter-row-compact !px-2 !py-1">

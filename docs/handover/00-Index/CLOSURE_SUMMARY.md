@@ -15,7 +15,7 @@
 
 ## What was delivered
 
-- **Reports:** MIS (register, summary, accounts, BD-MIS, deployment), distribution, ARCP, serial/location/warranty audits, cancelled calls (assignment filter), Athena reconciliation, **Spare Loan Check** (ZSS02 HTML vs CRM)
+- **Reports:** MIS (register, summary, accounts, BD-MIS, deployment), distribution, ARCP, serial/location/warranty audits, cancelled calls (assignment filter), Athena reconciliation, **Spare Loan Check against Cancelled Calls** (ZSS02 HTML vs CRM)
 - **Mail & alerts:** MIS digests, major-repair alerts, cancelled-call digests, subcontractor stock reconciliation
 - **Administration:** Users, roles/RBAC, read-model sync status, service-call activity, performance insights
 - **Documentation:** Business (BRD, scope), functional (FMS, admin guide), technical (architecture, API), live RBAC matrix, ops runbooks

@@ -13,10 +13,10 @@ Browse SAP **ZSS02** spare-parts HTML exports as-is (Plant / Vendor / Material /
 3. Re-upload **overwrites** existing rows for every plant in the file (no append / no duplicates).
 4. Header shows **Details as on DD-MM-YYYY** from the latest Loan Date in stored rows.
 5. Filters use **Apply filters** (draft until applied). Plant filter labels use CRM branch names.
-6. Status column (before Plant): cancelled (Ban) / franchisee change (warning) via the same CRM match rules as Spare Loan Check.
+6. Status column (before Plant): cancelled (Ban) / franchisee change (warning) via the same CRM match rules as Spare Loan Check against Cancelled Calls.
 7. Out-of-scope plants (non-HOD office restriction) are skipped and counted in `skipped`.
 
-Parser / CRM classify helpers are shared with Spare Loan Check. That page still only stores problem rows; this page stores the full ledger.
+Parser / CRM classify helpers are shared with Spare Loan Check against Cancelled Calls. That page still only stores problem rows; this page stores the full ledger.
 
 ## Schema
 

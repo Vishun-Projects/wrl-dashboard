@@ -62,7 +62,7 @@ Module-by-module functional reference. Technical implementation: `03-Technical/A
 
 ---
 
-## spare-loan-check — Spare Loan Check
+## spare-loan-check — Spare Loan Check against Cancelled Calls
 
 | Field | Detail |
 |-------|--------|

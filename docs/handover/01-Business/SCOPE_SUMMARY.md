@@ -14,7 +14,7 @@
 - Warranty Master
 - Cancelled Calls register (Postgres-backed; assigned / unassigned franchisee filter)
 - Failed Calls — Athena API reconciliation
-- Spare Loan Check — upload SAP ZSS02 HTML; vendor mismatch / cancelled / unassigned-cancelled vs CRM
+- Spare Loan Check against Cancelled Calls — upload SAP ZSS02 HTML; vendor mismatch / cancelled / unassigned-cancelled vs CRM
 
 ### Mail and alerts
 
@@ -65,7 +65,7 @@ Stakeholders may confirm (not blocking delivery):
 
 | Date | Source | Requirement / decision |
 |------|--------|------------------------|
-| 2026-09-07 | Production portal | https://wrl-dashboard.vercel.app — includes Spare Loan Check |
+| 2026-09-07 | Production portal | https://wrl-dashboard.vercel.app — includes Spare Loan Check against Cancelled Calls |
 | 2026-09-07 | Codebase (`main`) | Features listed in §In scope implemented in `src/modules/` |
 | 2026-09-07 | [`FMS_Functional_Module_Spec.md`](../02-Functional/FMS_Functional_Module_Spec.md) | Functional behaviour reference |
 | 2026-09-07 | Live DB export | RBAC roles and permissions in `04-RBAC/ROLES_SNAPSHOT.md` |

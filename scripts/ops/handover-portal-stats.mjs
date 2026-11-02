@@ -152,7 +152,7 @@ export function generateDeliveryStatementMarkdown({ snapshot, stats, totalUsers 
     '',
     '| Area | Delivered capability |',
     '| --- | --- |',
-    '| **Reporting** | MIS (Summary, Register, Accounts, BD-MIS, Deployment, Client Import), Call Distribution, ARCP, Serial/Location/Warranty audits, Cancelled Calls, Athena reconciliation, Spare Loan Check (ZSS02) |',
+    '| **Reporting** | MIS (Summary, Register, Accounts, BD-MIS, Deployment, Client Import), Call Distribution, ARCP, Serial/Location/Warranty audits, Cancelled Calls, Athena reconciliation, Spare Loan Check against Cancelled Calls (ZSS02) |',
     '| **Mail & alerts** | MIS digests, major-repair alerts, cancelled-call digests, subcontractor stock reconciliation |',
     '| **Administration** | Users, roles/RBAC, Mail & Alerts hub, read-model sync, service-call activity, performance insights, security audit log |',
     '| **Platform** | Supabase auth, office-scoped data, Vercel app + VPS workers |',

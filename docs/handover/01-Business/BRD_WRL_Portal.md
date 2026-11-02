@@ -96,7 +96,7 @@ See [`SCOPE_SUMMARY.md`](SCOPE_SUMMARY.md) for the detailed in/out list.
 | BR-05 | Admins manage users, roles, and mail settings without code deploy |
 | BR-06 | Scheduled jobs on VPS send digests and run read-model sync per documented cron |
 | BR-07 | Security audit log for privileged actions (super-admin) |
-| BR-08 | Spare Loan Check: upload ZSS02 HTML; flag vendor mismatch / cancelled SOs vs CRM |
+| BR-08 | Spare Loan Check against Cancelled Calls: upload ZSS02 HTML; flag vendor mismatch / cancelled SOs vs CRM |
 
 Detailed module behaviour: [`02-Functional/FMS_Functional_Module_Spec.md`](../02-Functional/FMS_Functional_Module_Spec.md).
 
@@ -144,7 +144,7 @@ Detailed module behaviour: [`02-Functional/FMS_Functional_Module_Spec.md`](../02
 | BR-05 | Admin user/role/mail without deploy | FMS §Administration, `/admin/*` routes | Delivered |
 | BR-06 | VPS cron sync and mail | [`SYNC_ENTRY_POINTS.md`](../05-Operations/SYNC_ENTRY_POINTS.md), [`MAIL_SCHEDULE.md`](../05-Operations/MAIL_SCHEDULE.md) | Delivered |
 | BR-07 | Security audit log | FMS §Security audit, `super_admin` capability | Delivered |
-| BR-08 | Spare Loan Check (ZSS02 vs CRM) | FMS §spare-loan-check, `/report/spare-loan-check` | Delivered |
+| BR-08 | Spare Loan Check against Cancelled Calls (ZSS02 vs CRM) | FMS §spare-loan-check, `/report/spare-loan-check` | Delivered |
 
 ---
 
