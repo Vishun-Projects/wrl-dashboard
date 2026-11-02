@@ -564,7 +564,6 @@ export default function Mb51AgingPageClient() {
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount load
   }, []);
 
   const vendorOptions = facetVendors;
