@@ -10,7 +10,7 @@ import type {
 } from '@/modules/mb51-aging/types';
 import type { PoolClient } from 'pg';
 
-const BATCH_SIZE = 800;
+const BATCH_SIZE = 2_500;
 const DAY = 86400000;
 const EPOCH_OFFSET = 25569;
 /** Large MB51 imports can exceed the default 120s API statement timeout. */
@@ -359,6 +359,11 @@ export async function saveMb51AgingImport(opts: {
   importId?: string | null;
   seqOffset?: number;
   expectedTotal?: number;
+  /**
+   * When set by the client: true = last chunk (rebuild snapshot), false = mid chunk.
+   * When omitted, fall back to seqOffset + rows.length vs expectedTotal.
+   */
+  finalize?: boolean;
 }): Promise<Mb51AgingImportMeta> {
   const {
     fileName,
@@ -368,6 +373,7 @@ export async function saveMb51AgingImport(opts: {
     importId: existingImportId,
     seqOffset = 0,
     expectedTotal,
+    finalize: finalizeOpt,
   } = opts;
 
   let finalizeImportId: string | null = null;
@@ -409,10 +415,10 @@ export async function saveMb51AgingImport(opts: {
           if (!exists.rows[0]) {
             throw new Error(`MB51 import ${existingImportId} not found for append`);
           }
-          const prior = await countImportRows(client, existingImportId);
           const fresh = await filterNewRowsForImport(client, existingImportId, rows);
           if (fresh.length) {
-            await insertRowBatch(client, existingImportId, fresh, prior);
+            // Use client seqOffset so parallel chunks don't collide on seq_order.
+            await insertRowBatch(client, existingImportId, fresh, seqOffset);
           }
           // Keep a readable label when a later file is appended onto prior data.
           if (fileName) {
@@ -429,10 +435,11 @@ export async function saveMb51AgingImport(opts: {
               [existingImportId, fileName]
             );
           }
-          // Client signals "last chunk" via seqOffset + payload length vs expectedTotal.
-          // Actual DB count may be lower when overlapping lines were skipped.
           const chunkEnd = seqOffset + rows.length;
-          const done = expectedTotal != null && chunkEnd >= expectedTotal;
+          const done =
+            typeof finalizeOpt === 'boolean'
+              ? finalizeOpt
+              : expectedTotal != null && chunkEnd >= expectedTotal;
           const actual = await countImportRows(client, existingImportId);
           await refreshImportCounts(existingImportId, actual, done);
           if (done) finalizeImportId = existingImportId;
@@ -470,7 +477,10 @@ export async function saveMb51AgingImport(opts: {
 
         await insertRowBatch(client, importId, uniqueRows, seqOffset);
         const chunkEnd = seqOffset + rows.length;
-        const done = expectedTotal == null || chunkEnd >= expectedTotal;
+        const done =
+          typeof finalizeOpt === 'boolean'
+            ? finalizeOpt
+            : expectedTotal == null || chunkEnd >= expectedTotal;
         const actual = await countImportRows(client, importId);
         await refreshImportCounts(importId, actual, done);
         if (done) finalizeImportId = importId;

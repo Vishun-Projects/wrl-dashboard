@@ -4,12 +4,70 @@ import { dedupeMb51Movements } from '@/modules/mb51-aging/dedupe';
 import type { Mb51AgingImportMeta, Mb51AgingMovement } from '@/modules/mb51-aging/types';
 
 /**
- * Fewer POSTs stay under API rate limits.
- * ~147k rows → ~19 chunks at 8k (was ~90 at 1.2k → 429).
+ * Larger chunks + parallel POSTs for multi‑lakh MB51 uploads.
+ * Packed row arrays keep JSON under typical serverless body caps.
+ * ~788k rows → ~32 chunks @ 25k; with concurrency 4 ≈ ~9 round-trips after the first.
  */
-export const MB51_SAVE_CHUNK = 8000;
+export const MB51_SAVE_CHUNK = 25_000;
+/** Parallel append chunks once importId is known (last chunk always alone to finalize). */
+export const MB51_SAVE_CONCURRENCY = 4;
 /** GET page size — full dump of multi‑M rows was ~350MB JSON → API 500. */
 export const MB51_LOAD_CHUNK = 40_000;
+
+/** Wire order for packed rows (shorter than keyed objects). */
+export const MB51_PACK_KEYS = [
+  'd',
+  'q',
+  'm',
+  'md',
+  'g',
+  'u',
+  'v',
+  'vn',
+  'mv',
+  'dc',
+  'mt',
+  'mtx',
+  'tx',
+] as const;
+
+export type Mb51PackKey = (typeof MB51_PACK_KEYS)[number];
+
+export function packMb51Rows(rows: Mb51AgingMovement[]): unknown[][] {
+  return rows.map((r) =>
+    MB51_PACK_KEYS.map((k) => {
+      const v = r[k];
+      return v == null ? '' : v;
+    })
+  );
+}
+
+export function unpackMb51Rows(packed: unknown): Mb51AgingMovement[] {
+  if (!Array.isArray(packed) || !packed.length) return [];
+  // Already objects (legacy clients)
+  if (packed[0] && typeof packed[0] === 'object' && !Array.isArray(packed[0])) {
+    return packed as Mb51AgingMovement[];
+  }
+  return (packed as unknown[][]).map((arr, i) => {
+    const row: Mb51AgingMovement = {
+      d: Number(arr[0]) || 0,
+      q: Number(arr[1]) || 0,
+      m: String(arr[2] ?? ''),
+      md: String(arr[3] ?? ''),
+      g: String(arr[4] ?? ''),
+      u: String(arr[5] ?? ''),
+      v: String(arr[6] ?? ''),
+      vn: String(arr[7] ?? ''),
+      mv: String(arr[8] ?? ''),
+      s: i,
+      dc: String(arr[9] ?? ''),
+      mt: String(arr[10] ?? ''),
+      mtx: String(arr[11] ?? ''),
+      tx: String(arr[12] ?? ''),
+    };
+    return row;
+  });
+}
 
 export type Mb51SaveBatch = {
   fileName: string;
@@ -65,7 +123,8 @@ export function planMb51SaveBatches(
 /** Payload shape: metadata before rows so importId cannot be lost if body is truncated. */
 export function buildMb51SaveBody(
   batch: Mb51SaveBatch,
-  importId: string | null
+  importId: string | null,
+  opts?: { finalize?: boolean }
 ): Record<string, unknown> {
   return {
     fileName: batch.fileName,
@@ -73,7 +132,9 @@ export function buildMb51SaveBody(
     importId: importId ?? batch.importId,
     seqOffset: batch.seqOffset,
     expectedTotal: batch.expectedTotal,
-    rows: batch.rows,
+    finalize: opts?.finalize === true,
+    packed: true,
+    rows: packMb51Rows(batch.rows),
   };
 }
 
@@ -93,6 +154,30 @@ export type SaveMb51Opts = {
   forceNewImport?: boolean;
   onProgress?: (saved: number, total: number) => void;
 };
+
+async function postSaveBatch(
+  batch: Mb51SaveBatch,
+  importId: string | null,
+  finalize: boolean
+): Promise<Mb51AgingImportMeta> {
+  const res = await fetchWithRetry('/api/report/mb51-aging', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildMb51SaveBody(batch, importId, { finalize })),
+    retries: 6,
+    retryDelayMs: 1200,
+  });
+
+  const data = (await res.json().catch(() => ({}))) as SaveResponse;
+  if (!res.ok || !data.import?.id) {
+    throw new Error(
+      data.error ||
+        `Save failed (${res.status}) at row ${batch.seqOffset + 1}`
+    );
+  }
+  return data.import;
+}
 
 /**
  * Persist parsed MB51 rows in batches.
@@ -141,40 +226,58 @@ export async function saveMb51AgingRows(
   let latest: Mb51AgingImportMeta | null = null;
   const newTotal = uniqueRows.length;
 
-  for (const batch of plan) {
-    if (batch.seqOffset > priorCount && !importId) {
-      throw new Error('MB51 save aborted: missing importId for append chunk');
-    }
-    onProgress?.(batch.seqOffset - priorCount, newTotal);
-
-    const res = await fetchWithRetry('/api/report/mb51-aging', {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildMb51SaveBody(batch, importId)),
-      retries: 6,
-      retryDelayMs: 1500,
-    });
-
-    const data = (await res.json().catch(() => ({}))) as SaveResponse;
-    if (!res.ok || !data.import?.id) {
-      throw new Error(
-        data.error || `Save failed (${res.status}) at row ${batch.seqOffset - priorCount + 1}`
-      );
-    }
-
-    if (importId && data.import.id !== importId) {
-      throw new Error(
-        `MB51 save created a new import mid-upload (${importId} → ${data.import.id}); aborting`
-      );
-    }
-
-    importId = data.import.id;
-    latest = data.import;
+  const markProgress = (batch: Mb51SaveBatch) => {
     onProgress?.(
       Math.min(batch.seqOffset - priorCount + batch.rows.length, newTotal),
       newTotal
     );
+  };
+
+  let start = 0;
+  // First chunk alone when creating a new import (need importId for the rest).
+  if (!importId) {
+    const first = plan[0];
+    if (!first) throw new Error('Save failed: empty plan');
+    onProgress?.(0, newTotal);
+    const only = plan.length === 1;
+    latest = await postSaveBatch(first, null, only);
+    importId = latest.id;
+    markProgress(first);
+    start = 1;
+  }
+
+  const rest = plan.slice(start);
+  if (rest.length) {
+    const last = rest[rest.length - 1];
+    const mid = rest.slice(0, -1);
+
+    for (let i = 0; i < mid.length; i += MB51_SAVE_CONCURRENCY) {
+      const wave = mid.slice(i, i + MB51_SAVE_CONCURRENCY);
+      onProgress?.(wave[0].seqOffset - priorCount, newTotal);
+      const results: Mb51AgingImportMeta[] = await Promise.all(
+        wave.map((batch): Promise<Mb51AgingImportMeta> =>
+          postSaveBatch(batch, importId, false)
+        )
+      );
+      for (const meta of results) {
+        if (meta.id !== importId) {
+          throw new Error(
+            `MB51 save created a new import mid-upload (${importId} → ${meta.id}); aborting`
+          );
+        }
+        latest = meta;
+      }
+      markProgress(wave[wave.length - 1]);
+    }
+
+    onProgress?.(last.seqOffset - priorCount, newTotal);
+    latest = await postSaveBatch(last, importId, true);
+    if (latest.id !== importId) {
+      throw new Error(
+        `MB51 save created a new import mid-upload (${importId} → ${latest.id}); aborting`
+      );
+    }
+    markProgress(last);
   }
 
   if (!latest) throw new Error('Save failed: no import metadata returned');

@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { assertSameOriginMutation } from '@/lib/api/same-origin';
 import { requireRbac } from '@/lib/auth/resolve-bearer-security';
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
+import { unpackMb51Rows } from '@/modules/mb51-aging/save-client';
 import { saveMb51AgingImport } from '@/modules/mb51-aging/server/store';
 import { fetchMb51Meta } from '@/modules/mb51-aging/server/snapshot-read';
-import type { Mb51AgingMovement } from '@/modules/mb51-aging/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -37,13 +37,21 @@ export async function POST(req: NextRequest) {
     }
 
     const fileName = String(body.fileName || 'MB51_Export.xlsx').trim();
-    const rows = body.rows as Mb51AgingMovement[];
+    const rows = unpackMb51Rows(body.rows);
+    if (!rows.length) {
+      return NextResponse.json(
+        { error: 'Invalid payload: could not unpack rows' },
+        { status: 400 }
+      );
+    }
     const importId =
       typeof body.importId === 'string' && body.importId.trim()
         ? body.importId.trim()
         : null;
     const seqOffset = Math.max(0, Number(body.seqOffset) || 0);
     const expectedTotal = Math.max(0, Number(body.expectedTotal) || 0) || undefined;
+    const finalize =
+      typeof body.finalize === 'boolean' ? body.finalize : undefined;
 
     // Chunk 2+ must append — never create a second import (that hid most rows on GET).
     if (seqOffset > 0 && !importId) {
@@ -64,6 +72,7 @@ export async function POST(req: NextRequest) {
       importId,
       seqOffset,
       expectedTotal,
+      finalize,
     });
 
     return NextResponse.json({
