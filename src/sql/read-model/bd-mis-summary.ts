@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db/prisma';
-import { todayIst } from '@/lib/dates/local-date';
+import { istDayEndIso, istDayStartIso, todayIst } from '@/lib/dates/local-date';
 import type { SummaryDashboard } from '@/lib/summary/derive';
 import { normalizeCallTypeDisplay } from '@/lib/call/display/call-type';
 import {
@@ -98,8 +98,8 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
   const endDate = params.endDate || todayIst();
   const agingDate = resolveAgingDate(params);
 
-  const periodStart = `${startDate}T00:00:00`;
-  const periodEnd = `${endDate}T23:59:59`;
+  const periodStart = istDayStartIso(startDate);
+  const periodEnd = istDayEndIso(endDate);
 
   const officeFilter = buildOfficeFilter(params, 'h', 3);
   const callTypeFilter = buildCallTypeFilter(params, 'h', officeFilter.nextIdx);
@@ -436,8 +436,8 @@ export async function queryBdMisCrmCallTraceRows(
 
   const startDate = params.startDate || yearStart();
   const endDate = params.endDate || todayIst();
-  const periodStart = `${startDate}T00:00:00`;
-  const periodEnd = `${endDate}T23:59:59`;
+  const periodStart = istDayStartIso(startDate);
+  const periodEnd = istDayEndIso(endDate);
 
   const officeFilter = buildOfficeFilter(params, 'h', 3);
   const callTypeFilter = buildCallTypeFilter(params, 'h', officeFilter.nextIdx);

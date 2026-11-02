@@ -1,7 +1,12 @@
 import { prisma } from '@/lib/db/prisma';
 import type { SummaryDashboard } from '@/lib/summary/derive';
 import { normalizeCallTypeDisplay } from '@/lib/call/display/call-type';
-import { formatLocalDate, todayIst } from '@/lib/dates/local-date';
+import {
+  istDayEndIso,
+  istDayStartIso,
+  monthStartIst,
+  todayIst,
+} from '@/lib/dates/local-date';
 import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/sql/read-model/summary-call-filters';
 import { AGING_BUCKET_SQL, openCallsFromAging } from '@/lib/aging/buckets';
 import {
@@ -138,8 +143,8 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
   const endDate = params.endDate || todayIst();
   const agingDate = resolveAgingDate(params);
 
-  const periodStart = `${startDate}T00:00:00`;
-  const periodEnd = `${endDate}T23:59:59`;
+  const periodStart = istDayStartIso(startDate);
+  const periodEnd = istDayEndIso(endDate);
 
   const officeFilter = buildOfficeFilter(params, 'h', 3, 'nofficeid');
   const callTypeFilter = buildCallTypeFilter(params, 'h', officeFilter.nextIdx);
@@ -545,14 +550,13 @@ function normalizeOpsRow(row: Partial<OpsKpiRow> | undefined): OpsKpiRow {
 
 /** National + regional MIS ops rollup for the home dashboard (this month by default). */
 export async function queryOpsKpis(params: SummaryQueryParams): Promise<OpsKpis> {
-  const now = new Date();
-  const startDate =
-    params.startDate || formatLocalDate(new Date(now.getFullYear(), now.getMonth(), 1));
-  const endDate = params.endDate || formatLocalDate(now);
+  const startDate = params.startDate || monthStartIst();
+  const endDate = params.endDate || todayIst();
   const agingDate = params.agingAsOf || endDate;
 
-  const periodStart = `${startDate}T00:00:00`;
-  const periodEnd = `${endDate}T23:59:59`;
+  // Match Call Register: IST day bounds (+05:30), not naive UTC midnight.
+  const periodStart = istDayStartIso(startDate);
+  const periodEnd = istDayEndIso(endDate);
 
   const officeFilter = buildOfficeFilter(params, 'h', 4, 'nofficeid');
   const callTypeFilter = buildCallTypeFilter(params, 'h', officeFilter.nextIdx);

@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db/prisma';
+import { istDayEndIso, istDayStartIso } from '@/lib/dates/local-date';
 import {
   normalizeExactTrnSearch,
   type RegisterDateFilterColumn,
@@ -280,13 +281,8 @@ export function hotRowToRegisterRow(row: Record<string, unknown>): Record<string
   });
 }
 
-/** Call Register date chips are IST calendar days (matches Western CRM). */
-const REGISTER_REPORT_TZ = '+05:30';
-
 function registerDateRangeBound(date: string, end = false): string {
-  return end
-    ? `${date}T23:59:59.999${REGISTER_REPORT_TZ}`
-    : `${date}T00:00:00${REGISTER_REPORT_TZ}`;
+  return end ? istDayEndIso(date) : istDayStartIso(date);
 }
 
 export function buildWhere(params: RegisterPostgresParams): { sql: string; values: unknown[] } {

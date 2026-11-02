@@ -16,6 +16,26 @@ export function yesterdayIst(): string {
   return dt.toISOString().slice(0, 10);
 }
 
+/** First day of the current IST calendar month (YYYY-MM-DD). */
+export function monthStartIst(day = todayIst()): string {
+  const [y, m] = day.split('-');
+  return `${y}-${m}-01`;
+}
+
+/**
+ * Call Register / MIS report date chips are IST calendar days (Western CRM).
+ * Naive `T00:00:00` without offset is UTC on the VPS and drops early-IST rows.
+ */
+export const REPORT_IST_OFFSET = '+05:30';
+
+export function istDayStartIso(ymd: string): string {
+  return `${ymd}T00:00:00${REPORT_IST_OFFSET}`;
+}
+
+export function istDayEndIso(ymd: string): string {
+  return `${ymd}T23:59:59.999${REPORT_IST_OFFSET}`;
+}
+
 export function toDateString(value: Date | string): string {
   if (value instanceof Date) return formatLocalDate(value);
   return String(value);
