@@ -68,9 +68,169 @@ export const CALL_PARTS_CATEGORY = `part_cat.item_category`;
 const DEFECTIVE_MATERIALS_SQL = `'1301709','1301712','1301714','2303393','2303396','2303398'`;
 /** Defective Generation movements → SAP doc (Defective). See sap-doc.ts matrix. */
 const DEFECTIVE_GENERATION_MOVEMENT_SQL = `'947','943','944','948'`;
+/** Consumption movements → SAP doc. See sap-doc.ts matrix. */
+const CONSUMPTION_MOVEMENT_SQL = `'947','943','944','948','702','309'`;
+/** Defective Receipt movements → SAP doc (Defective Receipt). */
+const DEFECTIVE_RECEIPT_MOVEMENT_SQL = `'941','949','952','942','951','301','302','541'`;
+
+/**
+ * CRM call / TRN on upper(btrim(item_text)): 20–29 + A–L month + 5–7 digits (len 8–10).
+ * A=Jan … L=Dec. Rejects free text, material codes, and overlong junk.
+ */
+export const CRM_CALL_NO_SQL_RE = `^2[0-9][A-L][0-9]{5,7}$`;
 
 export const SAP_DOC_HAS = '__has__';
 export const SAP_DOC_BLANK = '__blank__';
+
+export type Mb51NotInCrmFilterInput = {
+  allTime: boolean;
+  startDate: string;
+  endDate: string;
+  search: string;
+  /** Leading plant code from branch filter, or raw plant. */
+  plant: string;
+  part: string;
+  sapDoc: string;
+  sapDocDefective: string;
+  sapDocReceipt: string;
+};
+
+/**
+ * MB51 call nos (exact TRN format) with part movements that are absent from CRM hot + mirror.
+ * One row per call — for catching manually removed calls that still consumed parts in SAP.
+ */
+export function buildMb51NotInCrmSql(filters: Mb51NotInCrmFilterInput): {
+  sql: string;
+  params: unknown[];
+} {
+  const params: unknown[] = [];
+  const where: string[] = [
+    `r.import_id = (SELECT id FROM mb51_aging_imports ORDER BY imported_at DESC LIMIT 1)`,
+    `btrim(r.item_text) <> ''`,
+    `upper(btrim(r.item_text)) ~ '${CRM_CALL_NO_SQL_RE}'`,
+  ];
+
+  if (!filters.allTime) {
+    params.push(filters.startDate, filters.endDate);
+    where.push(
+      `r.posting_date >= $${params.length - 1}::date AND r.posting_date <= $${params.length}::date`
+    );
+  }
+
+  const search = filters.search.trim();
+  if (search) {
+    params.push(`%${search.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`);
+    where.push(`upper(btrim(r.item_text)) ILIKE $${params.length} ESCAPE '\\'`);
+  }
+
+  const plant = filters.plant.trim();
+  if (plant) {
+    params.push(plant);
+    where.push(`btrim(r.plant) = $${params.length}`);
+  }
+
+  const part = filters.part.trim();
+  if (part) {
+    params.push(`%${part.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`);
+    const n = params.length;
+    where.push(
+      `(r.material ILIKE $${n} ESCAPE '\\' OR r.material_description ILIKE $${n} ESCAPE '\\')`
+    );
+  }
+
+  const bucketCase = `CASE
+      WHEN btrim(r.movement_type) IN (${DEFECTIVE_RECEIPT_MOVEMENT_SQL})
+       AND r.material IN (${DEFECTIVE_MATERIALS_SQL}) THEN 'receipt'
+      WHEN btrim(r.movement_type) IN (${DEFECTIVE_GENERATION_MOVEMENT_SQL})
+       AND r.material IN (${DEFECTIVE_MATERIALS_SQL}) THEN 'generation'
+      WHEN btrim(r.movement_type) IN (${CONSUMPTION_MOVEMENT_SQL})
+       AND r.material NOT IN (${DEFECTIVE_MATERIALS_SQL})
+       AND upper(btrim(r.material_description)) NOT LIKE '%(D)%' THEN 'consumption'
+      ELSE NULL
+    END`;
+
+  const outer: string[] = [];
+  const pushSap = (col: string, raw: string) => {
+    const value = raw.trim();
+    if (!value) return;
+    if (value === SAP_DOC_HAS) {
+      outer.push(`${col} IS NOT NULL`);
+      return;
+    }
+    if (value === SAP_DOC_BLANK) {
+      outer.push(`${col} IS NULL`);
+      return;
+    }
+    params.push(`%${value.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`);
+    outer.push(`${col} ILIKE $${params.length} ESCAPE '\\'`);
+  };
+  pushSap('sap_doc', filters.sapDoc);
+  pushSap('sap_doc_defective', filters.sapDocDefective);
+  pushSap('sap_doc_receipt', filters.sapDocReceipt);
+
+  const sql = `
+    WITH lines AS (
+      SELECT
+        upper(btrim(r.item_text)) AS call_no,
+        btrim(r.plant) AS plant,
+        btrim(r.vendor) AS vendor,
+        regexp_replace(btrim(r.material), '^0+', '') AS material,
+        NULLIF(btrim(r.material_description), '') AS description,
+        NULLIF(btrim(r.material_document), '') AS material_document,
+        r.qty,
+        r.posting_date,
+        ${bucketCase} AS bucket
+      FROM mb51_aging_rows r
+      WHERE ${where.join(' AND ')}
+    ),
+    kept AS (
+      SELECT * FROM lines WHERE bucket IS NOT NULL
+    ),
+    orphan_calls AS (
+      SELECT DISTINCT k.call_no
+      FROM kept k
+      WHERE NOT EXISTS (
+              SELECT 1 FROM calls_latest_hot h
+              WHERE upper(btrim(h.vtrnno)) = k.call_no
+            )
+        AND NOT EXISTS (
+              SELECT 1 FROM calls_crm_mirror m
+              WHERE upper(btrim(m.vtrnno)) = k.call_no
+            )
+    ),
+    agg AS (
+      SELECT
+        o.call_no,
+        string_agg(DISTINCT NULLIF(k.plant, ''), ', ' ORDER BY NULLIF(k.plant, '')) AS plants,
+        string_agg(DISTINCT NULLIF(k.vendor, ''), ', ' ORDER BY NULLIF(k.vendor, '')) AS vendors,
+        string_agg(DISTINCT NULLIF(k.material, ''), ', ' ORDER BY NULLIF(k.material, ''))
+          FILTER (WHERE k.bucket = 'consumption') AS materials,
+        string_agg(DISTINCT NULLIF(k.description, ''), ', ' ORDER BY NULLIF(k.description, ''))
+          FILTER (WHERE k.bucket = 'consumption') AS descriptions,
+        string_agg(DISTINCT k.material_document, ', ' ORDER BY k.material_document)
+          FILTER (WHERE k.bucket = 'consumption' AND k.material_document IS NOT NULL) AS sap_doc,
+        to_char(min(k.posting_date) FILTER (WHERE k.bucket = 'consumption'), 'YYYY-MM-DD') AS sap_doc_posting_date,
+        coalesce(sum(k.qty) FILTER (WHERE k.bucket = 'consumption'), 0) AS cons_qty,
+        string_agg(DISTINCT k.material_document, ', ' ORDER BY k.material_document)
+          FILTER (WHERE k.bucket = 'generation' AND k.material_document IS NOT NULL) AS sap_doc_defective,
+        to_char(min(k.posting_date) FILTER (WHERE k.bucket = 'generation'), 'YYYY-MM-DD') AS sap_doc_defective_posting_date,
+        coalesce(sum(k.qty) FILTER (WHERE k.bucket = 'generation'), 0) AS defective_qty,
+        string_agg(DISTINCT k.material_document, ', ' ORDER BY k.material_document)
+          FILTER (WHERE k.bucket = 'receipt' AND k.material_document IS NOT NULL) AS sap_doc_receipt,
+        to_char(min(k.posting_date) FILTER (WHERE k.bucket = 'receipt'), 'YYYY-MM-DD') AS sap_doc_receipt_posting_date,
+        coalesce(sum(k.qty) FILTER (WHERE k.bucket = 'receipt'), 0) AS receipt_qty,
+        to_char(min(k.posting_date), 'YYYY-MM-DD') AS first_posting_date
+      FROM orphan_calls o
+      JOIN kept k ON k.call_no = o.call_no
+      GROUP BY o.call_no
+    )
+    SELECT * FROM agg
+    ${outer.length ? `WHERE ${outer.join(' AND ')}` : ''}
+    ORDER BY first_posting_date DESC NULLS LAST, call_no
+  `;
+
+  return { sql, params };
+}
 
 /** Defective Generation docs. Used when filtering/sorting SAP Doc (Defective). */
 export const CALL_PARTS_SAP_CTE = `

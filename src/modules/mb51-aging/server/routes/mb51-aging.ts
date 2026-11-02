@@ -53,8 +53,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Append chunks must never "replace"; only the first chunk may wipe.
-    const replaceExisting = importId ? false : body.replaceExisting !== false;
+    // Wipe is opt-in only (explicit replaceExisting: true). Default = keep prior data.
+    const replaceExisting = importId ? false : body.replaceExisting === true;
 
     const result = await saveMb51AgingImport({
       fileName,

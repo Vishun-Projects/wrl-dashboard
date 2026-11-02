@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import {
   buildCallPartsFilterSql,
+  buildMb51NotInCrmSql,
   CALL_PARTS_CATEGORY_JOIN,
   CALL_PARTS_SAP_CTE,
+  CRM_CALL_NO_SQL_RE,
   SAP_DOC_BLANK,
   SAP_DOC_HAS,
   matchesSapDocFilter,
@@ -107,5 +109,24 @@ assert.match(CALL_PARTS_SAP_CTE, /2303393/);
 assert.match(CALL_PARTS_SAP_CTE, /MOTOR/);
 assert.match(CALL_PARTS_SAP_CTE, /947/);
 assert.match(CALL_PARTS_SAP_CTE, /IN \('947'/);
+
+const orphan = buildMb51NotInCrmSql({
+  allTime: false,
+  startDate: '2026-10-01',
+  endDate: '2026-10-26',
+  search: '',
+  plant: '1152',
+  part: '',
+  sapDoc: '',
+  sapDocDefective: '',
+  sapDocReceipt: '',
+});
+assert.ok(orphan.sql.includes(CRM_CALL_NO_SQL_RE));
+assert.match(orphan.sql, /calls_crm_mirror/);
+assert.match(orphan.sql, /calls_latest_hot/);
+assert.match(orphan.sql, /posting_date/);
+assert.equal(orphan.params[0], '2026-10-01');
+assert.equal(orphan.params[2], '1152');
+assert.doesNotMatch(orphan.sql, /CONSUMED FOR/);
 
 console.log('call-parts query.check: ok');

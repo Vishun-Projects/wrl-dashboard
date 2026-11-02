@@ -69,6 +69,7 @@ function buildParams(opts: {
   sapDocDefective: string;
   sapDocReceipt: string;
   barcodeMismatch?: boolean;
+  mb51NotInCrm?: boolean;
   sort: { key: SortKey; dir: 'asc' | 'desc' } | null;
   page?: number;
   pageSize?: number;
@@ -92,6 +93,7 @@ function buildParams(opts: {
   if (opts.sapDocDefective.trim()) params.set('sapDocDefective', opts.sapDocDefective.trim());
   if (opts.sapDocReceipt.trim()) params.set('sapDocReceipt', opts.sapDocReceipt.trim());
   if (opts.barcodeMismatch) params.set('barcodeMismatch', '1');
+  if (opts.mb51NotInCrm) params.set('mb51NotInCrm', '1');
   if (opts.sort) {
     params.set('sort', opts.sort.key);
     params.set('dir', opts.sort.dir);
@@ -147,25 +149,35 @@ function SapDocCell({
   docs,
   barcode,
   mismatch,
+  postingDate,
   tone,
 }: {
   docs: string | null;
   barcode: string | null;
   mismatch: boolean;
+  postingDate?: string | null;
   tone: string;
 }) {
   const docText = docs?.trim() || '';
   const bcText = barcode?.trim() || '';
-  if (!docText && !bcText) {
-    return <Clip value={null} width="max-w-[11rem]" mono tone={tone} />;
+  const postText = postingDate?.trim() ? formatUiDate(postingDate) : '';
+  if (!docText && !bcText && !postText) {
+    return <Clip value={null} width="max-w-[13rem]" mono tone={tone} />;
   }
-  const title = [docText, bcText ? `SAP Barcode: ${bcText}` : '']
+  const title = [docText, postText ? `Posting: ${postText}` : '', bcText ? `SAP Barcode: ${bcText}` : '']
     .filter(Boolean)
     .join('\n');
   return (
     <AdminTd className={`${tone}${mismatch ? ' bg-rose-100/80' : ''}`}>
-      <div className="max-w-[11rem]" title={title}>
-        {docText ? <span className="block truncate font-mono text-[11px]">{docText}</span> : null}
+      <div className="max-w-[13rem]" title={title}>
+        {docText || postText ? (
+          <span className="flex min-w-0 items-baseline gap-1.5">
+            {docText ? <span className="truncate font-mono text-[11px]">{docText}</span> : null}
+            {postText ? (
+              <span className="shrink-0 whitespace-nowrap text-[10px] text-slate-600">{postText}</span>
+            ) : null}
+          </span>
+        ) : null}
         {bcText ? (
           <span
             className={`block truncate text-[10px] leading-tight ${
@@ -333,6 +345,8 @@ type FilterState = {
   sapRec: string;
   sapRecMode: SapMode;
   barcodeMismatch: boolean;
+  /** MB51 call nos (valid TRN format) with parts consumed but missing from CRM. */
+  mb51NotInCrm: boolean;
 };
 
 function emptyFilters(): FilterState {
@@ -354,6 +368,7 @@ function emptyFilters(): FilterState {
     sapRec: '',
     sapRecMode: '',
     barcodeMismatch: false,
+    mb51NotInCrm: false,
   };
 }
 
@@ -380,6 +395,7 @@ function toFilterArgs(f: FilterState) {
     sapDocDefective: sapFilterValue(f.sapDefMode, f.sapDef),
     sapDocReceipt: sapFilterValue(f.sapRecMode, f.sapRec),
     barcodeMismatch: f.barcodeMismatch,
+    mb51NotInCrm: f.mb51NotInCrm,
   };
 }
 
@@ -905,6 +921,19 @@ export default function CallVisitsPageClient() {
             >
               Mismatched only
             </button>
+            <button
+              type="button"
+              aria-pressed={draft.mb51NotInCrm}
+              title="MB51 Text that looks like a CRM call (YY + month A–L + digits, e.g. 26E22919) but is missing from CRM — often manually removed calls that still consumed parts"
+              onClick={() => setDraft((d) => ({ ...d, mb51NotInCrm: !d.mb51NotInCrm }))}
+              className={`h-6 shrink-0 rounded-md border px-1.5 text-[10px] font-medium ${
+                draft.mb51NotInCrm
+                  ? 'border-amber-400 bg-amber-50 text-amber-950'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              MB51 not in CRM
+            </button>
             <FilterSelect
               label="Part category"
               emptyLabel="All part categories"
@@ -936,7 +965,13 @@ export default function CallVisitsPageClient() {
             <span className="ml-auto text-[10px] text-slate-500">
               {loading
                 ? 'Loading…'
-                : `${total.toLocaleString()}${applied.barcodeMismatch ? ' mismatched' : ''} parts`}
+                : `${total.toLocaleString()}${
+                    applied.mb51NotInCrm
+                      ? ' orphan calls'
+                      : applied.barcodeMismatch
+                        ? ' mismatched'
+                        : ' parts'
+                  }`}
             </span>
           </div>
         </div>
@@ -1190,7 +1225,13 @@ function PartCell({
       return (
         <AdminTd className={`font-mono ${tone} ${PIN}`}>
           {r.callNo ? (
-            <TrnLink trn={r.callNo} officeId={r.nofficeid} className="text-left font-mono text-blue-700 hover:underline" />
+            r.nofficeid ? (
+              <TrnLink trn={r.callNo} officeId={r.nofficeid} className="text-left font-mono text-blue-700 hover:underline" />
+            ) : (
+              <span className="font-mono text-amber-900" title="Present in MB51, not found in CRM">
+                {r.callNo}
+              </span>
+            )
           ) : (
             '—'
           )}
@@ -1242,6 +1283,7 @@ function PartCell({
           docs={r.sapDoc}
           barcode={r.sapDocBarcode}
           mismatch={r.sapDocBarcodeMismatch}
+          postingDate={r.sapDocPostingDate}
           tone={tone}
         />
       );
@@ -1251,6 +1293,7 @@ function PartCell({
           docs={r.sapDocDefective}
           barcode={r.sapDocDefectiveBarcode}
           mismatch={r.sapDocDefectiveBarcodeMismatch}
+          postingDate={r.sapDocDefectivePostingDate}
           tone={tone}
         />
       );
@@ -1264,6 +1307,7 @@ function PartCell({
           docs={r.sapDocDefectiveReceipt}
           barcode={r.sapDocDefectiveReceiptBarcode}
           mismatch={r.sapDocDefectiveReceiptBarcodeMismatch}
+          postingDate={r.sapDocDefectiveReceiptPostingDate}
           tone={tone}
         />
       );

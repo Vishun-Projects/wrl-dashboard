@@ -1,4 +1,6 @@
 import { fetchWithRetry } from '@/lib/net/fetch-with-retry';
+import { fetchMb51Meta } from '@/modules/mb51-aging/api-client';
+import { dedupeMb51Movements } from '@/modules/mb51-aging/dedupe';
 import type { Mb51AgingImportMeta, Mb51AgingMovement } from '@/modules/mb51-aging/types';
 
 /**
@@ -12,28 +14,49 @@ export const MB51_LOAD_CHUNK = 40_000;
 export type Mb51SaveBatch = {
   fileName: string;
   rows: Mb51AgingMovement[];
+  /** Always false for UI uploads — never wipe prior imports. */
   replaceExisting: boolean;
   importId: string | null;
   seqOffset: number;
   expectedTotal: number;
 };
 
-/** Pure batch plan — first chunk replaces, later chunks append. */
+export type PlanMb51SaveOpts = {
+  chunkSize?: number;
+  /** Existing import to append into (keeps prior rows in that import). */
+  priorImportId?: string | null;
+  /** Row count already stored for that import (new chunks start here). */
+  priorRowCount?: number;
+  /** Opt-in wipe — UI must leave this false. */
+  replaceExisting?: boolean;
+};
+
+/** Pure batch plan. Default creates a new import; never wipes unless replaceExisting is true. */
 export function planMb51SaveBatches(
   fileName: string,
   rows: Mb51AgingMovement[],
-  chunkSize = MB51_SAVE_CHUNK
+  chunkSizeOrOpts: number | PlanMb51SaveOpts = MB51_SAVE_CHUNK
 ): Mb51SaveBatch[] {
   if (!rows.length) return [];
+  const opts: PlanMb51SaveOpts =
+    typeof chunkSizeOrOpts === 'number'
+      ? { chunkSize: chunkSizeOrOpts }
+      : chunkSizeOrOpts;
+  const chunkSize = opts.chunkSize ?? MB51_SAVE_CHUNK;
+  const priorCount = Math.max(0, opts.priorRowCount ?? 0);
+  const priorId = opts.priorImportId?.trim() || null;
+  const wipe = opts.replaceExisting === true && !priorId;
+  const expectedTotal = priorCount + rows.length;
+
   const batches: Mb51SaveBatch[] = [];
   for (let offset = 0; offset < rows.length; offset += chunkSize) {
     batches.push({
       fileName,
       rows: rows.slice(offset, offset + chunkSize),
-      replaceExisting: offset === 0,
-      importId: null, // filled by caller after first response
-      seqOffset: offset,
-      expectedTotal: rows.length,
+      replaceExisting: wipe && offset === 0,
+      importId: priorId,
+      seqOffset: priorCount + offset,
+      expectedTotal,
     });
   }
   return batches;
@@ -47,7 +70,7 @@ export function buildMb51SaveBody(
   return {
     fileName: batch.fileName,
     replaceExisting: batch.replaceExisting && !importId,
-    importId,
+    importId: importId ?? batch.importId,
     seqOffset: batch.seqOffset,
     expectedTotal: batch.expectedTotal,
     rows: batch.rows,
@@ -60,27 +83,60 @@ type SaveResponse = {
   error?: string;
 };
 
+export type SaveMb51Opts = {
+  /** Append into this import instead of creating a new one. */
+  appendToImportId?: string | null;
+  onProgress?: (saved: number, total: number) => void;
+};
+
 /**
- * Persist parsed MB51 rows in batches. First batch replaces prior imports;
- * later batches append to the same import_id. Retries 429/5xx.
- * Fails if final meta.rowCount !== rows.length.
+ * Persist parsed MB51 rows in batches.
+ * Default: create a **new** import (prior imports stay). Never deletes.
+ * Pass appendToImportId to add rows onto an existing import (Part2 onto Part1).
  */
 export async function saveMb51AgingRows(
   fileName: string,
   rows: Mb51AgingMovement[],
-  onProgress?: (saved: number, total: number) => void
+  onProgressOrOpts?: ((saved: number, total: number) => void) | SaveMb51Opts
 ): Promise<Mb51AgingImportMeta> {
   if (!rows.length) throw new Error('No rows to save');
 
-  const plan = planMb51SaveBatches(fileName, rows);
-  let importId: string | null = null;
+  const opts: SaveMb51Opts =
+    typeof onProgressOrOpts === 'function'
+      ? { onProgress: onProgressOrOpts }
+      : onProgressOrOpts ?? {};
+  const onProgress = opts.onProgress;
+
+  // Drop identical lines inside this upload before chunking.
+  const { rows: uniqueRows } = dedupeMb51Movements(rows);
+  if (!uniqueRows.length) throw new Error('No rows to save after removing duplicates');
+
+  let priorCount = 0;
+  let priorId: string | null = null;
+  if (opts.appendToImportId) {
+    const { imports } = await fetchMb51Meta(opts.appendToImportId);
+    const target =
+      imports.find((i) => i.id === opts.appendToImportId) ??
+      (await fetchMb51Meta(opts.appendToImportId)).latestImport;
+    if (!target) throw new Error('Append target import not found');
+    priorId = target.id;
+    priorCount = target.rowCount;
+  }
+
+  const plan = planMb51SaveBatches(fileName, uniqueRows, {
+    priorImportId: priorId,
+    priorRowCount: priorCount,
+    replaceExisting: false,
+  });
+  let importId: string | null = priorId;
   let latest: Mb51AgingImportMeta | null = null;
+  const newTotal = uniqueRows.length;
 
   for (const batch of plan) {
-    if (batch.seqOffset > 0 && !importId) {
+    if (batch.seqOffset > priorCount && !importId) {
       throw new Error('MB51 save aborted: missing importId for append chunk');
     }
-    onProgress?.(batch.seqOffset, rows.length);
+    onProgress?.(batch.seqOffset - priorCount, newTotal);
 
     const res = await fetchWithRetry('/api/report/mb51-aging', {
       method: 'POST',
@@ -94,11 +150,10 @@ export async function saveMb51AgingRows(
     const data = (await res.json().catch(() => ({}))) as SaveResponse;
     if (!res.ok || !data.import?.id) {
       throw new Error(
-        data.error || `Save failed (${res.status}) at row ${batch.seqOffset + 1}`
+        data.error || `Save failed (${res.status}) at row ${batch.seqOffset - priorCount + 1}`
       );
     }
 
-    // Every chunk must report the same import id after the first
     if (importId && data.import.id !== importId) {
       throw new Error(
         `MB51 save created a new import mid-upload (${importId} → ${data.import.id}); aborting`
@@ -107,13 +162,22 @@ export async function saveMb51AgingRows(
 
     importId = data.import.id;
     latest = data.import;
-    onProgress?.(Math.min(batch.seqOffset + batch.rows.length, rows.length), rows.length);
+    onProgress?.(
+      Math.min(batch.seqOffset - priorCount + batch.rows.length, newTotal),
+      newTotal
+    );
   }
 
   if (!latest) throw new Error('Save failed: no import metadata returned');
-  if (latest.rowCount !== rows.length) {
+  // Server may skip lines already present on append → rowCount can be below prior+new.
+  if (latest.rowCount < priorCount) {
     throw new Error(
-      `MB51 save incomplete: stored ${latest.rowCount.toLocaleString('en-IN')} of ${rows.length.toLocaleString('en-IN')} rows`
+      `MB51 save lost rows: had ${priorCount.toLocaleString('en-IN')}, now ${latest.rowCount.toLocaleString('en-IN')}`
+    );
+  }
+  if (latest.rowCount > priorCount + uniqueRows.length) {
+    throw new Error(
+      `MB51 save row count too high: stored ${latest.rowCount.toLocaleString('en-IN')} (expected at most ${(priorCount + uniqueRows.length).toLocaleString('en-IN')})`
     );
   }
   return latest;

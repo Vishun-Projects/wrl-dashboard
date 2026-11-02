@@ -1,4 +1,8 @@
 import { withAppClient } from '@/lib/read-model/db';
+import {
+  dedupeMb51Movements,
+  mb51MovementDedupeKey,
+} from '@/modules/mb51-aging/dedupe';
 import { buildDefaultSnapshot } from '@/modules/mb51-aging/server/fifo-from-db';
 import type {
   Mb51AgingImportMeta,
@@ -43,12 +47,78 @@ function toMeta(imp: {
   };
 }
 
+async function loadExistingDedupeKeys(
+  client: PoolClient,
+  importId: string,
+  rows: Mb51AgingMovement[]
+): Promise<Set<string>> {
+  const docs = [...new Set(rows.map((r) => r.dc ?? ''))];
+  if (!docs.length) return new Set();
+
+  const res = await client.query<{
+    material_document: string;
+    plant: string;
+    material: string;
+    movement_type: string;
+    posting_date_serial: number;
+    qty: string;
+    vendor: string;
+    uom: string;
+    item_text: string;
+  }>(
+    `
+    SELECT material_document, plant, material, movement_type,
+           posting_date_serial, qty::text AS qty, vendor, uom, item_text
+    FROM mb51_aging_rows
+    WHERE import_id = $1
+      AND material_document = ANY($2::text[])
+    `,
+    [importId, docs]
+  );
+
+  const keys = new Set<string>();
+  for (const r of res.rows) {
+    keys.add(
+      mb51MovementDedupeKey({
+        d: r.posting_date_serial,
+        q: Number(r.qty),
+        m: r.material,
+        md: '',
+        g: '',
+        u: r.uom,
+        v: r.vendor,
+        vn: '',
+        mv: r.plant,
+        s: 0,
+        dc: r.material_document,
+        mt: r.movement_type,
+        tx: r.item_text,
+      })
+    );
+  }
+  return keys;
+}
+
+/** Drop lines already stored on this import (append / overlapping Part2). */
+async function filterNewRowsForImport(
+  client: PoolClient,
+  importId: string,
+  rows: Mb51AgingMovement[]
+): Promise<Mb51AgingMovement[]> {
+  const { rows: unique } = dedupeMb51Movements(rows);
+  if (!unique.length) return [];
+  const existing = await loadExistingDedupeKeys(client, importId, unique);
+  if (!existing.size) return unique;
+  return unique.filter((r) => !existing.has(mb51MovementDedupeKey(r)));
+}
+
 async function insertRowBatch(
   client: PoolClient,
   importId: string,
   rows: Mb51AgingMovement[],
   seqOffset: number
-): Promise<void> {
+): Promise<number> {
+  let inserted = 0;
   for (let offset = 0; offset < rows.length; offset += BATCH_SIZE) {
     const chunk = rows.slice(offset, offset + BATCH_SIZE);
     const values: unknown[] = [];
@@ -107,8 +177,18 @@ async function insertRowBatch(
         `,
         values
       );
+      inserted += chunk.length;
     }
   }
+  return inserted;
+}
+
+async function countImportRows(client: PoolClient, importId: string): Promise<number> {
+  const res = await client.query<{ n: number }>(
+    `SELECT count(*)::int AS n FROM mb51_aging_rows WHERE import_id = $1`,
+    [importId]
+  );
+  return res.rows[0]?.n ?? 0;
 }
 
 async function fetchImportMeta(
@@ -284,13 +364,11 @@ export async function saveMb51AgingImport(opts: {
     fileName,
     uploadedBy,
     rows,
-    replaceExisting = true,
+    replaceExisting = false,
     importId: existingImportId,
     seqOffset = 0,
     expectedTotal,
   } = opts;
-  const plants = new Set(rows.map((r) => r.mv).filter(Boolean));
-  const materials = new Set(rows.map((r) => r.m).filter(Boolean));
 
   let finalizeImportId: string | null = null;
 
@@ -320,7 +398,7 @@ export async function saveMb51AgingImport(opts: {
         );
       }
 
-      // Append chunk to an in-progress import
+      // Append chunk to an in-progress import (or append another file onto selected import).
       if (existingImportId) {
         await client.query('BEGIN');
         try {
@@ -331,22 +409,33 @@ export async function saveMb51AgingImport(opts: {
           if (!exists.rows[0]) {
             throw new Error(`MB51 import ${existingImportId} not found for append`);
           }
-          await insertRowBatch(client, existingImportId, rows, seqOffset);
-          const saved = seqOffset + rows.length;
-          const done = expectedTotal != null && saved >= expectedTotal;
-          await refreshImportCounts(existingImportId, saved, done);
-          if (done && expectedTotal != null) {
-            const actual = await client.query<{ n: number }>(
-              `SELECT count(*)::int AS n FROM mb51_aging_rows WHERE import_id = $1`,
-              [existingImportId]
-            );
-            if (actual.rows[0]?.n !== expectedTotal) {
-              throw new Error(
-                `MB51 import incomplete: expected ${expectedTotal} rows, have ${actual.rows[0]?.n ?? 0}`
-              );
-            }
-            finalizeImportId = existingImportId;
+          const prior = await countImportRows(client, existingImportId);
+          const fresh = await filterNewRowsForImport(client, existingImportId, rows);
+          if (fresh.length) {
+            await insertRowBatch(client, existingImportId, fresh, prior);
           }
+          // Keep a readable label when a later file is appended onto prior data.
+          if (fileName) {
+            await client.query(
+              `
+              UPDATE mb51_aging_imports
+              SET file_name = CASE
+                WHEN file_name = $2 OR file_name LIKE $2 || ' (%' THEN file_name
+                WHEN position($2 in file_name) > 0 THEN file_name
+                ELSE $2 || ' (+prior)'
+              END
+              WHERE id = $1
+              `,
+              [existingImportId, fileName]
+            );
+          }
+          // Client signals "last chunk" via seqOffset + payload length vs expectedTotal.
+          // Actual DB count may be lower when overlapping lines were skipped.
+          const chunkEnd = seqOffset + rows.length;
+          const done = expectedTotal != null && chunkEnd >= expectedTotal;
+          const actual = await countImportRows(client, existingImportId);
+          await refreshImportCounts(existingImportId, actual, done);
+          if (done) finalizeImportId = existingImportId;
           await client.query('COMMIT');
           return await fetchImportMeta(client, existingImportId);
         } catch (err) {
@@ -357,10 +446,14 @@ export async function saveMb51AgingImport(opts: {
 
       await client.query('BEGIN');
       try {
+        // Destructive wipe is opt-in only (CLI --replace). UI uploads must never wipe.
         if (replaceExisting) {
-          // Keep the latest upload fresh; clear out older imports to keep storage efficient
           await client.query('DELETE FROM mb51_aging_imports');
         }
+
+        const { rows: uniqueRows } = dedupeMb51Movements(rows);
+        const plantCount = new Set(uniqueRows.map((r) => r.mv).filter(Boolean)).size;
+        const materialCount = new Set(uniqueRows.map((r) => r.m).filter(Boolean)).size;
 
         const ins = await client.query<{ id: string; imported_at: Date }>(
           `
@@ -369,27 +462,17 @@ export async function saveMb51AgingImport(opts: {
         ) VALUES ($1, $2, $3, $4, $5)
         RETURNING id, imported_at
         `,
-          [fileName, uploadedBy, rows.length, plants.size, materials.size]
+          [fileName, uploadedBy, uniqueRows.length, plantCount, materialCount]
         );
 
         const importId = ins.rows[0]?.id;
         if (!importId) throw new Error('Failed to create MB51 import');
 
-        await insertRowBatch(client, importId, rows, seqOffset);
-        const saved = seqOffset + rows.length;
-        const done = expectedTotal == null || saved >= expectedTotal;
-        await refreshImportCounts(importId, saved, done);
-        if (done && expectedTotal != null) {
-          const actual = await client.query<{ n: number }>(
-            `SELECT count(*)::int AS n FROM mb51_aging_rows WHERE import_id = $1`,
-            [importId]
-          );
-          if (actual.rows[0]?.n !== expectedTotal) {
-            throw new Error(
-              `MB51 import incomplete: expected ${expectedTotal} rows, have ${actual.rows[0]?.n ?? 0}`
-            );
-          }
-        }
+        await insertRowBatch(client, importId, uniqueRows, seqOffset);
+        const chunkEnd = seqOffset + rows.length;
+        const done = expectedTotal == null || chunkEnd >= expectedTotal;
+        const actual = await countImportRows(client, importId);
+        await refreshImportCounts(importId, actual, done);
         if (done) finalizeImportId = importId;
 
         await client.query('COMMIT');

@@ -17,8 +17,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'groupKey required' }, { status: 400 });
     }
     const bucketIdx = Number(body?.bucketIdx);
+    const importId =
+      typeof body?.importId === 'string' && body.importId.trim()
+        ? body.importId.trim()
+        : null;
     const data = await fetchMb51Detail({
       paramHash: String(body?.paramHash || DEFAULT_PARAM_HASH),
+      importId,
       groupKey,
       bucketIdx: Number.isFinite(bucketIdx) ? bucketIdx : -1,
     });

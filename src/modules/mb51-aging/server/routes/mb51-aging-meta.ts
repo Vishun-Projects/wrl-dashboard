@@ -10,7 +10,8 @@ export async function GET(req: NextRequest) {
   try {
     const auth = await requireRbac(req, { pageId: 'mb51_aging' });
     if (!auth.ok) return auth.response;
-    return NextResponse.json(await fetchMb51Meta());
+    const importId = req.nextUrl.searchParams.get('importId');
+    return NextResponse.json(await fetchMb51Meta(importId));
   } catch (err) {
     console.error('[mb51-aging meta]', err);
     return NextResponse.json({ error: toUserFacingError(err) }, { status: 500 });

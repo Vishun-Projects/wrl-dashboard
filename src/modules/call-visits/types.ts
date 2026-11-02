@@ -8,12 +8,18 @@ export type CallPartRow = {
   partCode: string | null;
   /** Consumption SAP material document for the fitted (non-defective) part. */
   sapDoc: string | null;
+  /** Earliest consumption MB51 posting_date (YYYY-MM-DD). */
+  sapDocPostingDate: string | null;
   /** Defective Generation SAP document. */
   sapDocDefective: string | null;
+  /** Earliest defective-generation MB51 posting_date (YYYY-MM-DD). */
+  sapDocDefectivePostingDate: string | null;
   /** Summed MB51 qty for Defective Generation. */
   sapDocDefectiveQty: string | null;
   /** Defective Receipt SAP document. */
   sapDocDefectiveReceipt: string | null;
+  /** Earliest defective-receipt MB51 posting_date (YYYY-MM-DD). */
+  sapDocDefectiveReceiptPostingDate: string | null;
   /** Summed MB51 qty for Defective Receipt. */
   sapDocDefectiveReceiptQty: string | null;
   /** Object Description barcodes from MM doc import for the matched SAP docs. */

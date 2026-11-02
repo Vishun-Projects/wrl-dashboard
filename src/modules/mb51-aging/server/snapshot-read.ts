@@ -41,9 +41,42 @@ function toMeta(
   };
 }
 
-async function latestImportOn(
+async function listImportsOn(
   client: import('pg').PoolClient
+): Promise<Mb51AgingImportMeta[]> {
+  const importRes = await client.query<{
+    id: string;
+    file_name: string;
+    uploaded_by: string | null;
+    row_count: number;
+    plant_count: number;
+    material_count: number;
+    imported_at: Date;
+    has_snap: boolean;
+  }>(
+    `
+    SELECT i.id, i.file_name, i.uploaded_by, i.row_count, i.plant_count,
+           i.material_count, i.imported_at,
+           EXISTS (
+             SELECT 1 FROM mb51_aging_snapshots s
+             WHERE s.import_id = i.id AND s.param_hash = $1
+           ) AS has_snap
+    FROM mb51_aging_imports i
+    ORDER BY i.imported_at DESC
+    LIMIT 50
+    `,
+    [DEFAULT_PARAM_HASH]
+  );
+  return importRes.rows.map((imp) =>
+    toMeta(imp, { snapshotReady: imp.has_snap })
+  );
+}
+
+async function resolveImportOn(
+  client: import('pg').PoolClient,
+  importId?: string | null
 ): Promise<Mb51AgingImportMeta | null> {
+  const id = importId?.trim() || null;
   const importRes = await client.query<{
     id: string;
     file_name: string;
@@ -53,14 +86,26 @@ async function latestImportOn(
     material_count: number;
     imported_at: Date;
   }>(
-    `
-    SELECT id, file_name, uploaded_by, row_count, plant_count, material_count, imported_at
-    FROM mb51_aging_imports
-    ORDER BY imported_at DESC
-    LIMIT 1
-    `
+    id
+      ? `
+        SELECT id, file_name, uploaded_by, row_count, plant_count, material_count, imported_at
+        FROM mb51_aging_imports
+        WHERE id = $1
+        LIMIT 1
+        `
+      : `
+        SELECT id, file_name, uploaded_by, row_count, plant_count, material_count, imported_at
+        FROM mb51_aging_imports
+        ORDER BY imported_at DESC
+        LIMIT 1
+        `,
+    id ? [id] : []
   );
-  if (!importRes.rows[0]) return null;
+  if (!importRes.rows[0]) {
+    // Unknown id → fall back to latest so the UI never dead-ends.
+    if (id) return resolveImportOn(client, null);
+    return null;
+  }
 
   const imp = importRes.rows[0];
   const bounds = await client.query<{
@@ -90,11 +135,26 @@ async function latestImportOn(
   });
 }
 
-export async function fetchMb51Meta(): Promise<{
+/** @deprecated use resolveImportOn — kept name for grep familiarity in this file. */
+async function latestImportOn(
+  client: import('pg').PoolClient,
+  importId?: string | null
+): Promise<Mb51AgingImportMeta | null> {
+  return resolveImportOn(client, importId);
+}
+
+export async function fetchMb51Meta(importId?: string | null): Promise<{
   latestImport: Mb51AgingImportMeta | null;
+  imports: Mb51AgingImportMeta[];
 }> {
   return withAppClient(
-    async (client) => ({ latestImport: await latestImportOn(client) }),
+    async (client) => {
+      const [imports, latestImport] = await Promise.all([
+        listImportsOn(client),
+        resolveImportOn(client, importId),
+      ]);
+      return { latestImport, imports };
+    },
     { statementTimeoutMs: LOAD_MS }
   );
 }
@@ -130,22 +190,30 @@ async function loadSnapshotSummary(
   };
 }
 
-export async function fetchMb51Summary(paramHash = DEFAULT_PARAM_HASH): Promise<{
+export async function fetchMb51Summary(
+  paramHash = DEFAULT_PARAM_HASH,
+  importId?: string | null
+): Promise<{
   latestImport: Mb51AgingImportMeta | null;
   summary: Mb51AgingSummary | null;
   params: Mb51AgingReportParams | null;
+  imports: Mb51AgingImportMeta[];
 }> {
   return withAppClient(
     async (client) => {
-      const latestImport = await latestImportOn(client);
+      const [imports, latestImport] = await Promise.all([
+        listImportsOn(client),
+        resolveImportOn(client, importId),
+      ]);
       if (!latestImport) {
-        return { latestImport: null, summary: null, params: null };
+        return { latestImport: null, summary: null, params: null, imports };
       }
       const snap = await loadSnapshotSummary(client, latestImport.id, paramHash);
       return {
         latestImport: { ...latestImport, snapshotReady: !!snap },
         summary: snap?.summary ?? null,
         params: snap?.params ?? null,
+        imports,
       };
     },
     { statementTimeoutMs: LOAD_MS }
@@ -154,6 +222,7 @@ export async function fetchMb51Summary(paramHash = DEFAULT_PARAM_HASH): Promise<
 
 export async function fetchMb51AggPage(opts: {
   paramHash?: string;
+  importId?: string | null;
   page?: number;
   pageSize?: number;
   q?: string;
@@ -175,7 +244,7 @@ export async function fetchMb51AggPage(opts: {
 
   return withAppClient(
     async (client) => {
-      const latestImport = await latestImportOn(client);
+      const latestImport = await latestImportOn(client, opts.importId);
       if (!latestImport) {
         return { rows: [], total: 0, page, pageSize, paramHash };
       }
@@ -281,9 +350,10 @@ export async function fetchMb51AggPage(opts: {
 }
 
 export async function rebuildMb51Report(
-  params: Mb51AgingReportParams
+  params: Mb51AgingReportParams,
+  importId?: string | null
 ): Promise<{ summary: Mb51AgingSummary; paramHash: string }> {
-  const meta = await fetchMb51Meta();
+  const meta = await fetchMb51Meta(importId);
   if (!meta.latestImport) throw new Error('No MB51 import found');
   const paramHash = hashReportParams(params);
   const built = await materializeMb51Snapshot({
@@ -296,6 +366,7 @@ export async function rebuildMb51Report(
 
 export async function fetchMb51Detail(opts: {
   paramHash?: string;
+  importId?: string | null;
   groupKey: string;
   /** >=0 bucket index; -1 all aging buckets; -2 net-stock mode */
   bucketIdx: number;
@@ -306,7 +377,7 @@ export async function fetchMb51Detail(opts: {
   const paramHash = opts.paramHash || DEFAULT_PARAM_HASH;
   return withAppClient(
     async (client) => {
-      const latestImport = await latestImportOn(client);
+      const latestImport = await latestImportOn(client, opts.importId);
       if (!latestImport) return { lines: [] };
       const snap = await loadSnapshotSummary(
         client,
@@ -446,6 +517,7 @@ export async function fetchMb51Detail(opts: {
 export async function fetchMb51Facets(opts?: {
   q?: string;
   limit?: number;
+  importId?: string | null;
 }): Promise<{
   plants: { id: string; text: string }[];
   vendors: { id: string; text: string }[];
@@ -471,7 +543,7 @@ export async function fetchMb51Facets(opts?: {
   };
   return withAppClient(
     async (client) => {
-      const latestImport = await latestImportOn(client);
+      const latestImport = await latestImportOn(client, opts?.importId);
       if (!latestImport) {
         return {
           plants: [],
@@ -580,6 +652,7 @@ export async function fetchMb51Facets(opts?: {
 }
 
 export async function fetchMb51MovementsPage(opts: {
+  importId?: string | null;
   afterSeq?: number;
   /** Prefer offset for random page access; afterSeq kept for keyset scans. */
   offset?: number;
@@ -613,7 +686,7 @@ export async function fetchMb51MovementsPage(opts: {
 
   return withAppClient(
     async (client) => {
-      const latestImport = await latestImportOn(client);
+      const latestImport = await latestImportOn(client, opts.importId);
       if (!latestImport) {
         return {
           rows: [],

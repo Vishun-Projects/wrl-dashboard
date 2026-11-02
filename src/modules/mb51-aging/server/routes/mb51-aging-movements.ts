@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
     const offsetRaw = sp.get('offset');
     return NextResponse.json(
       await fetchMb51MovementsPage({
+        importId: sp.get('importId'),
         afterSeq: Number(sp.get('afterSeq') ?? -1),
         offset: offsetRaw != null && offsetRaw !== '' ? Number(offsetRaw) : undefined,
         limit: Number(sp.get('limit') || 100),

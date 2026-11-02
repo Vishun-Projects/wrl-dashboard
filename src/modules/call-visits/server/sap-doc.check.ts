@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   daysDiffTechSolveCons,
+  isCrmCallNoFormat,
   matchSapDocDefective,
   matchSapDocOriginal,
   type SapDocPart,
@@ -68,20 +69,23 @@ assert.deepEqual(matchSapDocDefective(part({}), '307843', generationHits), {
   docs: '4908777158, 4908777159',
   qty: '2',
   materials: ['2303396'],
+  postingDate: null,
 });
 assert.deepEqual(
   matchSapDocDefective(part({ partCategory: 'COMPRESOR', partCode: '1500001' }), '307843', generationHits),
-  { docs: '4908652310', qty: '1', materials: ['2303393'] }
+  { docs: '4908652310', qty: '1', materials: ['2303393'], postingDate: null }
 );
 assert.deepEqual(matchSapDocDefective(part({ partCategory: 'GAS' }), '307843', generationHits), {
   docs: null,
   qty: null,
   materials: [],
+  postingDate: null,
 });
 assert.deepEqual(matchSapDocDefective(part({}), '307843', receiptHits), {
   docs: '4909000001',
   qty: '5',
   materials: ['2303396'],
+  postingDate: null,
 });
 
 assert.deepEqual(matchSapDocOriginal(part({ partCode: '1519780' }), '307843', consumptionHits), {
@@ -98,6 +102,19 @@ assert.deepEqual(matchSapDocOriginal(part({ partCode: '9999999' }), '307843', co
 assert.equal(daysDiffTechSolveCons('2026-03-15', '2026-03-10'), -5);
 assert.equal(daysDiffTechSolveCons('2026-03-10', '2026-03-15'), 5);
 assert.equal(daysDiffTechSolveCons(null, '2026-03-10'), null);
+
+assert.equal(isCrmCallNoFormat('26E22919'), true); // 2026 May
+assert.equal(isCrmCallNoFormat('24B29011'), true); // 2024 Feb
+assert.equal(isCrmCallNoFormat('26K01076'), true); // 2026 Nov
+assert.equal(isCrmCallNoFormat('24J0410351'), true); // 10-char (7-digit seq) exists in CRM
+assert.equal(isCrmCallNoFormat('CONSUMED FOR STOCK'), false);
+assert.equal(isCrmCallNoFormat('2303396'), false); // material — old loose wrongly matched
+assert.equal(isCrmCallNoFormat('26M01076'), false); // M is not a month letter
+assert.equal(isCrmCallNoFormat('12A23030622014330'), false); // overlong / wrong century
+assert.equal(isCrmCallNoFormat('83A230505022214052'), false);
+assert.equal(isCrmCallNoFormat('26E'), false);
+assert.equal(isCrmCallNoFormat('24H16659A1'), false); // transfer suffix, not base TRN
+assert.equal(isCrmCallNoFormat(''), false);
 
 assert.deepEqual(keysFromDocsAndMaterials('4901000001', ['1519780']), [
   { doc: '4901000001', material: '1519780' },

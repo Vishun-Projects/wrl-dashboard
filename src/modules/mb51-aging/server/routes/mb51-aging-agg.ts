@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       await fetchMb51AggPage({
         paramHash: sp.get('paramHash')?.trim() || DEFAULT_PARAM_HASH,
+        importId: sp.get('importId'),
         page: Number(sp.get('page') || 1),
         pageSize: Number(sp.get('pageSize') || 100),
         q: sp.get('q') || '',

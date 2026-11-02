@@ -243,9 +243,31 @@ function MultiSelectDropdown({
   );
 }
 
+const MB51_ACTIVE_IMPORT_KEY = 'mb51.activeImportId';
+
+function readStoredImportId(): string | null {
+  try {
+    return localStorage.getItem(MB51_ACTIVE_IMPORT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredImportId(id: string | null) {
+  try {
+    if (id) localStorage.setItem(MB51_ACTIVE_IMPORT_KEY, id);
+    else localStorage.removeItem(MB51_ACTIVE_IMPORT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function Mb51TablePageClient() {
   const [rows, setRows] = useState<MovementRow[]>([]);
   const [latestImport, setLatestImport] = useState<Mb51AgingImportMeta | null>(null);
+  const [imports, setImports] = useState<Mb51AgingImportMeta[]>([]);
+  const [activeImportId, setActiveImportId] = useState<string | null>(null);
+  const [appendOnUpload, setAppendOnUpload] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadMsg, setLoadMsg] = useState('Loading MB51 Movements Data from portal database…');
   const [isErrMsg, setIsErrMsg] = useState(false);
@@ -312,10 +334,16 @@ export default function Mb51TablePageClient() {
     setPage(1);
   }, []);
 
+  const selectImport = useCallback((id: string | null) => {
+    setActiveImportId(id);
+    writeStoredImportId(id);
+  }, []);
+
   const refreshMovements = useCallback(async () => {
     const fromSerial = dateToSerial(dateFrom);
     const toSerial = dateToSerial(dateTo);
     const data = await fetchMb51MovementsPage({
+      importId: activeImportId,
       offset: (page - 1) * PAGE_SIZE,
       limit: PAGE_SIZE,
       dateFrom: fromSerial,
@@ -331,6 +359,7 @@ export default function Mb51TablePageClient() {
     setTotalCount(data.totalCount);
     setRows(data.rows.map((r, idx) => normalizeMovement(r, (page - 1) * PAGE_SIZE + idx)));
   }, [
+    activeImportId,
     dateFrom,
     dateTo,
     page,
@@ -348,13 +377,16 @@ export default function Mb51TablePageClient() {
       try {
         setLoading(true);
         setLoadMsg('Loading KPIs…');
-        const meta = await fetchMb51Meta();
+        const preferred = readStoredImportId();
+        const meta = await fetchMb51Meta(preferred);
         if (!active) return;
+        setImports(meta.imports ?? []);
         if (!meta.latestImport) {
           setLoadMsg('No saved data found in database. Please upload your MB51 export file.');
           setShowUpload(true);
           return;
         }
+        selectImport(meta.latestImport.id);
         setLatestImport(meta.latestImport);
         const mn = meta.latestImport.minPostingSerial ?? 0;
         const mx = meta.latestImport.maxPostingSerial ?? 0;
@@ -364,7 +396,7 @@ export default function Mb51TablePageClient() {
         setDateTo(maxISO);
         setMinDateLimit(minISO);
         setMaxDateLimit(maxISO);
-        const facets = await fetchMb51Facets();
+        const facets = await fetchMb51Facets('', meta.latestImport.id);
         if (!active) return;
         const toOpt = (xs: { id: string; text: string }[]) =>
           xs.map((x) => ({ id: x.id, text: x.text, lc: x.text.toLowerCase() }));
@@ -455,18 +487,20 @@ export default function Mb51TablePageClient() {
     try {
       setLoading(true);
       setIsErrMsg(false);
-      const meta = await saveMb51AgingRows(
-        fileName,
-        movementRows as Mb51AgingMovement[],
-        (saved, total) => {
+      const meta = await saveMb51AgingRows(fileName, movementRows as Mb51AgingMovement[], {
+        appendToImportId: appendOnUpload ? activeImportId : null,
+        onProgress: (saved, total) => {
           setLoadMsg(
             `Saving to database… ${saved.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')} rows`
           );
-        }
-      );
+        },
+      });
+      selectImport(meta.id);
       setLatestImport(meta);
+      const listed = await fetchMb51Meta(meta.id);
+      setImports(listed.imports ?? []);
       setLoadMsg('Building aging snapshot…');
-      const facets = await fetchMb51Facets();
+      const facets = await fetchMb51Facets('', meta.id);
       const toOpt = (xs: { id: string; text: string }[]) =>
         xs.map((x) => ({ id: x.id, text: x.text, lc: x.text.toLowerCase() }));
       setFacetVendors(toOpt(facets.vendors));
@@ -476,7 +510,7 @@ export default function Mb51TablePageClient() {
       setFacetMovements(toOpt(facets.movements));
       setPage(1);
       setLoadMsg(
-        `Saved ${movementRows.length.toLocaleString('en-IN')} rows (${meta.fileName}).`
+        `Import has ${meta.rowCount.toLocaleString('en-IN')} rows (${meta.fileName}).`
       );
       setIsErrMsg(false);
       setShowUpload(false);
@@ -490,7 +524,45 @@ export default function Mb51TablePageClient() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeImportId, appendOnUpload, selectImport]);
+
+  const switchImport = useCallback(
+    async (id: string) => {
+      selectImport(id);
+      setLoading(true);
+      setLoadMsg('Loading import…');
+      try {
+        const meta = await fetchMb51Meta(id);
+        setImports(meta.imports ?? []);
+        if (!meta.latestImport) throw new Error('Import not found');
+        setLatestImport(meta.latestImport);
+        const mn = meta.latestImport.minPostingSerial ?? 0;
+        const mx = meta.latestImport.maxPostingSerial ?? 0;
+        setDateFrom(serialToISO(mn));
+        setDateTo(serialToISO(mx));
+        setMinDateLimit(serialToISO(mn));
+        setMaxDateLimit(serialToISO(mx));
+        const facets = await fetchMb51Facets('', id);
+        const toOpt = (xs: { id: string; text: string }[]) =>
+          xs.map((x) => ({ id: x.id, text: x.text, lc: x.text.toLowerCase() }));
+        setFacetVendors(toOpt(facets.vendors));
+        setFacetGroups(toOpt(facets.groups));
+        setFacetMaterials(toOpt(facets.materials));
+        setFacetPlants(toOpt(facets.plants));
+        setFacetMovements(toOpt(facets.movements));
+        setPage(1);
+        setLoadMsg('');
+        setIsErrMsg(false);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Failed to load import';
+        setLoadMsg(message);
+        setIsErrMsg(true);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [selectImport]
+  );
 
   // Parse selected workbook sheets
   const processSheets = useCallback(
@@ -737,9 +809,29 @@ export default function Mb51TablePageClient() {
         </div>
         <div className="spacer" />
         <div className="header-actions">
+          {imports.length > 0 && (
+            <label className="import-pick" title="Each upload is kept as its own import">
+              <span>Import</span>
+              <select
+                value={activeImportId ?? ''}
+                disabled={loading}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  if (id) void switchImport(id);
+                }}
+              >
+                {imports.map((imp) => (
+                  <option key={imp.id} value={imp.id}>
+                    {imp.fileName} · {imp.rowCount.toLocaleString('en-IN')} rows ·{' '}
+                    {new Date(imp.importedAt).toLocaleDateString()}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <Link href="/report/mb51-aging" className="btn sec">Aging Report (FIFO)</Link>
           <span className="btn current-view">Movements Table</span>
-          {rows.length > 0 && (
+          {(rows.length > 0 || imports.length > 0) && (
             <button type="button" className="btn sec" onClick={() => setShowUpload((visible) => !visible)}>
               {showUpload ? 'Back to table' : 'Load another file'}
             </button>
@@ -790,6 +882,16 @@ export default function Mb51TablePageClient() {
                   }}
                 />
               </p>
+              {imports.length > 0 && (
+                <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 12 }}>
+                  <input
+                    type="checkbox"
+                    checked={appendOnUpload}
+                    onChange={(e) => setAppendOnUpload(e.target.checked)}
+                  />
+                  Append to selected import (otherwise create a new import — prior data is kept)
+                </label>
+              )}
 
               {availableSheets.length > 0 && (
                 <div className="sheets">
@@ -1049,6 +1151,24 @@ export default function Mb51TablePageClient() {
         .mb51-root .filters .ms-btn:focus {
           outline: 2px solid #86b6e8;
           outline-offset: 0;
+        }
+        .mb51-root .import-pick {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 12px;
+          color: #dbe7f5;
+        }
+        .mb51-root .import-pick select {
+          max-width: min(360px, 42vw);
+          height: 28px;
+          border: 1px solid #7ea0c4;
+          border-radius: 5px;
+          padding: 0 6px;
+          background: #0a4a8c;
+          color: #fff;
+          font: inherit;
+          font-size: 12px;
         }
         .mb51-root .filters .actions {
           display: flex;

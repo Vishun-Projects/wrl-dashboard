@@ -52,4 +52,16 @@ if pgrep -f 'cancelled-call-register/run.ts' >/dev/null 2>&1; then
 else
   npm run sync-worker:backfill-cancelled || echo "WARN: Cancelled register backfill failed (non-fatal)"
 fi
+# spare-loan-check / cancelled-register source: resume stuck dtrndate backfill, then editedon incremental
+echo "calls_crm_mirror backfill resume (no-op if status=ok) + incremental"
+if pgrep -f 'cli.ts calls-mirror-backfill' >/dev/null 2>&1; then
+  echo "SKIP calls-mirror-backfill — already running"
+else
+  npm run sync-worker:calls-mirror-backfill || echo "WARN: calls-mirror-backfill failed (non-fatal)"
+fi
+if pgrep -f 'cli.ts calls-mirror-incremental' >/dev/null 2>&1; then
+  echo "SKIP calls-mirror-incremental — already running"
+else
+  npm run sync-worker:calls-mirror-incremental || echo "WARN: calls-mirror-incremental failed (non-fatal)"
+fi
 echo "=== sync-worker-nightly done $(date -Iseconds) ==="

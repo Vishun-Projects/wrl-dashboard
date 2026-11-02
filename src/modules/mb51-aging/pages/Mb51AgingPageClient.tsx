@@ -321,8 +321,30 @@ function summaryToResult(
   };
 }
 
+const MB51_ACTIVE_IMPORT_KEY = 'mb51.activeImportId';
+
+function readStoredImportId(): string | null {
+  try {
+    return localStorage.getItem(MB51_ACTIVE_IMPORT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredImportId(id: string | null) {
+  try {
+    if (id) localStorage.setItem(MB51_ACTIVE_IMPORT_KEY, id);
+    else localStorage.removeItem(MB51_ACTIVE_IMPORT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function Mb51AgingPageClient() {
   const [latestImport, setLatestImport] = useState<Mb51AgingImportMeta | null>(null);
+  const [imports, setImports] = useState<Mb51AgingImportMeta[]>([]);
+  const [activeImportId, setActiveImportId] = useState<string | null>(null);
+  const [appendOnUpload, setAppendOnUpload] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadMsg, setLoadMsg] = useState<string>('Loading MB51 Aging Report from portal database…');
   const [isErrMsg, setIsErrMsg] = useState(false);
@@ -393,10 +415,16 @@ export default function Mb51AgingPageClient() {
     r: Mb51AgingMovement;
   }[] | null>(null);
 
+  const selectImport = useCallback((id: string | null) => {
+    setActiveImportId(id);
+    writeStoredImportId(id);
+  }, []);
+
   const loadAggPage = useCallback(
-    async (hash: string, pageNum: number, q: string, sort: string, dir: number) => {
+    async (hash: string, pageNum: number, q: string, sort: string, dir: number, importId?: string | null) => {
       const agg = await fetchMb51AggPage({
         paramHash: hash,
+        importId: importId ?? activeImportId,
         page: pageNum,
         pageSize: PAGE_SIZE,
         q,
@@ -407,7 +435,7 @@ export default function Mb51AgingPageClient() {
       setAggTotal(agg.total);
       setPage(agg.page);
     },
-    []
+    [activeImportId]
   );
 
   const applyMetaDates = useCallback((imp: Mb51AgingImportMeta) => {
@@ -424,16 +452,19 @@ export default function Mb51AgingPageClient() {
   }, []);
 
   const loadSnapshotView = useCallback(
-    async (hash = 'default') => {
+    async (hash = 'default', importId?: string | null) => {
+      const id = importId ?? activeImportId ?? readStoredImportId();
       const [sumRes, facets] = await Promise.all([
-        fetchMb51Summary(hash),
-        fetchMb51Facets(),
+        fetchMb51Summary(hash, id),
+        fetchMb51Facets('', id),
       ]);
+      if (sumRes.imports) setImports(sumRes.imports);
       if (!sumRes.latestImport) {
         setShowUpload(true);
         setLoadMsg('No saved data found in database. Please upload your MB51 export file.');
         return false;
       }
+      selectImport(sumRes.latestImport.id);
       setLatestImport(sumRes.latestImport);
       applyMetaDates(sumRes.latestImport);
       setFacetVendors(
@@ -495,7 +526,7 @@ export default function Mb51AgingPageClient() {
       setLoadMsg('');
       return true;
     },
-    [applyMetaDates]
+    [applyMetaDates, activeImportId, selectImport]
   );
 
   // Fast path: meta + summary KPIs + first agg page (no movement dump)
@@ -505,17 +536,20 @@ export default function Mb51AgingPageClient() {
       try {
         setLoading(true);
         setLoadMsg('Loading KPIs…');
-        const meta = await fetchMb51Meta();
+        const preferred = readStoredImportId();
+        const meta = await fetchMb51Meta(preferred);
         if (!active) return;
+        setImports(meta.imports ?? []);
         if (!meta.latestImport) {
           setLoadMsg('No saved data found in database. Please upload your MB51 export file.');
           setShowUpload(true);
           return;
         }
+        selectImport(meta.latestImport.id);
         setLatestImport(meta.latestImport);
         applyMetaDates(meta.latestImport);
         setIsErrMsg(false);
-        await loadSnapshotView('default');
+        await loadSnapshotView('default', meta.latestImport.id);
       } catch (err: unknown) {
         if (!active) return;
         const msg = err instanceof Error ? err.message : 'Failed to query database';
@@ -530,7 +564,8 @@ export default function Mb51AgingPageClient() {
     return () => {
       active = false;
     };
-  }, [applyMetaDates, loadSnapshotView]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount load
+  }, []);
 
   const vendorOptions = facetVendors;
   const groupOptions = facetGroups;
@@ -556,20 +591,23 @@ export default function Mb51AgingPageClient() {
       setLoading(true);
       setLoadMsg('Computing aging…');
       setIsErrMsg(false);
-      const rebuilt = await postMb51Report({
-        basis,
-        from: dateToSerial(dateFrom) ?? -1e9,
-        to: dateToSerial(dateTo) ?? 1e9,
-        groupBy,
-        plants: [...selectedPlants],
-        vendors: [...selectedVendors],
-        groups: [...selectedGroups],
-        materials: [...selectedMaterials],
-        excludedMaterials: [...excludedMaterials],
-      });
+      const rebuilt = await postMb51Report(
+        {
+          basis,
+          from: dateToSerial(dateFrom) ?? -1e9,
+          to: dateToSerial(dateTo) ?? 1e9,
+          groupBy,
+          plants: [...selectedPlants],
+          vendors: [...selectedVendors],
+          groups: [...selectedGroups],
+          materials: [...selectedMaterials],
+          excludedMaterials: [...excludedMaterials],
+        },
+        activeImportId
+      );
       setParamHash(rebuilt.paramHash);
       setSummary(rebuilt.summary);
-      await loadAggPage(rebuilt.paramHash, 1, searchQuery, sortKey || 'total', sortDir);
+      await loadAggPage(rebuilt.paramHash, 1, searchQuery, sortKey || 'total', sortDir, activeImportId);
       setLoadMsg('');
       setShowUpload(false);
     } catch (err: unknown) {
@@ -593,6 +631,7 @@ export default function Mb51AgingPageClient() {
     sortKey,
     sortDir,
     loadAggPage,
+    activeImportId,
   ]);
 
   // Save parsed data to backend (chunked — large MB51 JSON cannot go in one POST)
@@ -600,14 +639,18 @@ export default function Mb51AgingPageClient() {
     try {
       setLoading(true);
       setIsErrMsg(false);
-      const meta = await saveMb51AgingRows(fileName, parsedRows, (saved, total) => {
-        setLoadMsg(
-          `Saving to database… ${saved.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')} rows`
-        );
+      const meta = await saveMb51AgingRows(fileName, parsedRows, {
+        appendToImportId: appendOnUpload ? activeImportId : null,
+        onProgress: (saved, total) => {
+          setLoadMsg(
+            `Saving to database… ${saved.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')} rows`
+          );
+        },
       });
+      selectImport(meta.id);
       setLatestImport(meta);
       setLoadMsg('Building aging snapshot…');
-      await loadSnapshotView('default');
+      await loadSnapshotView('default', meta.id);
       setLoadMsg('');
       setIsErrMsg(false);
     } catch (err: unknown) {
@@ -826,6 +869,7 @@ export default function Mb51AgingPageClient() {
     for (;;) {
       const chunk = await fetchMb51AggPage({
         paramHash,
+        importId: activeImportId,
         page: p,
         pageSize: 500,
         q: searchQuery,
@@ -930,6 +974,7 @@ export default function Mb51AgingPageClient() {
         if (!key) continue;
         const data = await postMb51Detail({
           paramHash,
+          importId: activeImportId,
           groupKey: key,
           bucketIdx,
         });
@@ -961,6 +1006,7 @@ export default function Mb51AgingPageClient() {
         if (!key) continue;
         const data = await postMb51Detail({
           paramHash,
+          importId: activeImportId,
           groupKey: key,
           bucketIdx: -2,
         });
@@ -1076,14 +1122,37 @@ export default function Mb51AgingPageClient() {
           </div>
         </div>
         <div className="spacer" />
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {imports.length > 0 && (
+            <label className="import-pick" title="Each upload is kept as its own import">
+              <span>Import</span>
+              <select
+                value={activeImportId ?? ''}
+                disabled={loading}
+                onChange={(e) => {
+                  const id = e.target.value || null;
+                  selectImport(id);
+                  setLoading(true);
+                  setLoadMsg('Loading import…');
+                  void loadSnapshotView('default', id).finally(() => setLoading(false));
+                }}
+              >
+                {imports.map((imp) => (
+                  <option key={imp.id} value={imp.id}>
+                    {imp.fileName} · {imp.rowCount.toLocaleString('en-IN')} rows ·{' '}
+                    {new Date(imp.importedAt).toLocaleDateString()}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <span className="btn" style={{ cursor: 'default' }}>
             Aging Report (FIFO)
           </span>
           <Link href="/report/mb51-table" className="btn sec" style={{ textDecoration: 'none' }}>
             Movements Table
           </Link>
-          {!!summary && (
+          {(!!summary || imports.length > 0) && (
             <button
               type="button"
               className="btn sec"
@@ -1153,6 +1222,16 @@ export default function Mb51AgingPageClient() {
                   }}
                 />
               </p>
+              {imports.length > 0 && (
+                <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 12 }}>
+                  <input
+                    type="checkbox"
+                    checked={appendOnUpload}
+                    onChange={(e) => setAppendOnUpload(e.target.checked)}
+                  />
+                  Append to selected import (otherwise create a new import — prior data is kept)
+                </label>
+              )}
 
               {availableSheets.length > 0 && (
                 <div className="sheets">
@@ -1924,6 +2003,24 @@ export default function Mb51AgingPageClient() {
         }
         .mb51-app header .spacer {
           flex: 1;
+        }
+        .mb51-app .import-pick {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 12px;
+          color: #dbe7f5;
+        }
+        .mb51-app .import-pick select {
+          max-width: min(360px, 42vw);
+          height: 28px;
+          border: 1px solid #7ea0c4;
+          border-radius: 5px;
+          padding: 0 6px;
+          background: #0a4a8c;
+          color: #fff;
+          font: inherit;
+          font-size: 12px;
         }
         .mb51-app main {
           flex: 1 1 0;

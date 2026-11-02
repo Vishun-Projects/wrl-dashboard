@@ -13,7 +13,8 @@ export async function GET(req: NextRequest) {
     if (!auth.ok) return auth.response;
     const paramHash =
       req.nextUrl.searchParams.get('paramHash')?.trim() || DEFAULT_PARAM_HASH;
-    return NextResponse.json(await fetchMb51Summary(paramHash));
+    const importId = req.nextUrl.searchParams.get('importId');
+    return NextResponse.json(await fetchMb51Summary(paramHash, importId));
   } catch (err) {
     console.error('[mb51-aging summary]', err);
     return NextResponse.json({ error: toUserFacingError(err) }, { status: 500 });

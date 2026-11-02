@@ -15,6 +15,7 @@ export async function GET(req: NextRequest) {
       await fetchMb51Facets({
         q: sp.get('q') || '',
         limit: Number(sp.get('limit') || 400),
+        importId: sp.get('importId'),
       })
     );
   } catch (err) {

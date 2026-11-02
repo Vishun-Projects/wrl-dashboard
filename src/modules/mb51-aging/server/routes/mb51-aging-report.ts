@@ -38,7 +38,11 @@ export async function POST(req: NextRequest) {
     if (!Number.isFinite(params.from)) params.from = -1e9;
     if (!Number.isFinite(params.to)) params.to = 1e9;
 
-    const result = await rebuildMb51Report(params);
+    const importId =
+      typeof body.importId === 'string' && body.importId.trim()
+        ? body.importId.trim()
+        : null;
+    const result = await rebuildMb51Report(params, importId);
     return NextResponse.json(result);
   } catch (err) {
     console.error('[mb51-aging report]', err);

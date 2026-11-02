@@ -39,8 +39,12 @@ export type SapDocPair = {
   /** Earliest consumption MB51 posting_date (YYYY-MM-DD). */
   sapDocPostingDate: string | null;
   sapDocDefective: string | null;
+  /** Earliest defective-generation MB51 posting_date (YYYY-MM-DD). */
+  sapDocDefectivePostingDate: string | null;
   sapDocDefectiveQty: string | null;
   sapDocDefectiveReceipt: string | null;
+  /** Earliest defective-receipt MB51 posting_date (YYYY-MM-DD). */
+  sapDocDefectiveReceiptPostingDate: string | null;
   sapDocDefectiveReceiptQty: string | null;
   sapDocBarcode: string | null;
   sapDocBarcodeMismatch: boolean;
@@ -76,7 +80,24 @@ type SapDocHit = {
   postingDate?: string | null;
 };
 
-export type DefectiveMatch = { docs: string | null; qty: string | null; materials: string[] };
+export type DefectiveMatch = {
+  docs: string | null;
+  qty: string | null;
+  materials: string[];
+  postingDate: string | null;
+};
+
+/**
+ * CRM call / TRN: 20–29 year + month A–L (A=Jan … L=Dec) + 5–7 sequence digits.
+ * Length 8–10 total, e.g. 26E22919 = 2026 May #22919.
+ * Rejects free text, material codes, and overlong junk the old loose pattern matched.
+ */
+export const CRM_CALL_NO_RE = /^2[0-9][A-La-l][0-9]{5,7}$/;
+
+export function isCrmCallNoFormat(raw: string | null | undefined): boolean {
+  const cleaned = (raw ?? '').trim().replace(/-/g, '');
+  return CRM_CALL_NO_RE.test(cleaned);
+}
 
 export type SapDocLookup = {
   match(part: SapDocPart): SapDocPair;
@@ -160,21 +181,25 @@ function collectDefective(hits: SapDocHit[], keep: (hit: SapDocHit) => boolean):
   const materials = new Set<string>();
   let qty = 0;
   let matched = false;
+  let postingDate: string | null = null;
   for (const hit of hits) {
     if (!keep(hit)) continue;
     matched = true;
     qty += hitQty(hit);
     if (hit.material) materials.add(hit.material);
+    const pd = hitPostingYmd(hit);
+    if (pd && (postingDate == null || pd < postingDate)) postingDate = pd;
     for (const doc of (hit.docs ?? '').split(',')) {
       const trimmed = doc.trim();
       if (trimmed) docs.add(trimmed);
     }
   }
-  if (!matched) return { docs: null, qty: null, materials: [] };
+  if (!matched) return { docs: null, qty: null, materials: [], postingDate: null };
   return {
     docs: docs.size === 0 ? null : [...docs].sort().join(', '),
     qty: formatQty(qty),
     materials: [...materials],
+    postingDate,
   };
 }
 
@@ -196,7 +221,7 @@ function defectiveKeep(part: SapDocPart, vendor: string): ((hit: SapDocHit) => b
 /** Defective materials / (D) family match on plant + vendor + call. */
 export function matchSapDocDefective(part: SapDocPart, vendor: string, hits: SapDocHit[]): DefectiveMatch {
   const keep = defectiveKeep(part, vendor);
-  if (!keep) return { docs: null, qty: null, materials: [] };
+  if (!keep) return { docs: null, qty: null, materials: [], postingDate: null };
   return collectDefective(hits, keep);
 }
 
@@ -231,8 +256,10 @@ const EMPTY_PAIR: SapDocPair = {
   sapDoc: null,
   sapDocPostingDate: null,
   sapDocDefective: null,
+  sapDocDefectivePostingDate: null,
   sapDocDefectiveQty: null,
   sapDocDefectiveReceipt: null,
+  sapDocDefectiveReceiptPostingDate: null,
   sapDocDefectiveReceiptQty: null,
   sapDocBarcode: null,
   sapDocBarcodeMismatch: false,
@@ -256,9 +283,11 @@ function enrichWithBarcodes(
     sapDocPostingDate: string | null;
     sapDocMaterials: string[];
     sapDocDefective: string | null;
+    sapDocDefectivePostingDate: string | null;
     sapDocDefectiveQty: string | null;
     sapDocDefectiveMaterials: string[];
     sapDocDefectiveReceipt: string | null;
+    sapDocDefectiveReceiptPostingDate: string | null;
     sapDocDefectiveReceiptQty: string | null;
     sapDocDefectiveReceiptMaterials: string[];
   },
@@ -275,8 +304,10 @@ function enrichWithBarcodes(
     sapDoc: docs.sapDoc,
     sapDocPostingDate: docs.sapDocPostingDate,
     sapDocDefective: docs.sapDocDefective,
+    sapDocDefectivePostingDate: docs.sapDocDefectivePostingDate,
     sapDocDefectiveQty: docs.sapDocDefectiveQty,
     sapDocDefectiveReceipt: docs.sapDocDefectiveReceipt,
+    sapDocDefectiveReceiptPostingDate: docs.sapDocDefectiveReceiptPostingDate,
     sapDocDefectiveReceiptQty: docs.sapDocDefectiveReceiptQty,
     sapDocBarcode,
     sapDocBarcodeMismatch: mm.mismatch(part.newBarcode, sapDocBarcode),
@@ -309,9 +340,11 @@ function buildLookup(
           sapDocPostingDate: consumption.postingDate,
           sapDocMaterials: consumption.materials,
           sapDocDefective: generation.docs,
+          sapDocDefectivePostingDate: generation.postingDate,
           sapDocDefectiveQty: generation.qty,
           sapDocDefectiveMaterials: generation.materials,
           sapDocDefectiveReceipt: receipt.docs,
+          sapDocDefectiveReceiptPostingDate: receipt.postingDate,
           sapDocDefectiveReceiptQty: receipt.qty,
           sapDocDefectiveReceiptMaterials: receipt.materials,
         },

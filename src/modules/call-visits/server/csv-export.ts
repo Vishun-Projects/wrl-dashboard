@@ -11,13 +11,14 @@ import {
   matchesSapDocFilter,
   sapDocOuterSql,
 } from '@/sql/call-visits/query';
-import { sapBaseSql, type CallPartsFilters } from '@/modules/call-visits/server/query';
+import { fetchCallPartsRows, sapBaseSql, type CallPartsFilters } from '@/modules/call-visits/server/query';
 import {
   daysDiffTechSolveCons,
   getCachedSapDocLookup,
   hasSapBarcodeMismatch,
   type SapDocPair,
 } from '@/modules/call-visits/server/sap-doc';
+import type { CallPartRow } from '@/modules/call-visits/types';
 
 const FETCH_SIZE = 5_000;
 /** ponytail: one HTTP export stops at 500k rows. */
@@ -41,13 +42,16 @@ const HEADERS = [
   'Part category',
   'Part code',
   'SAP doc',
+  'SAP doc posting date',
   'Part',
   'Qty',
   'New barcode',
   'Days Diff (Cons in SAP - techSolve)',
   'SAP doc (Defective)',
+  'SAP doc (Defective) posting date',
   'Defective qty',
   'SAP doc (Defective Receipt)',
+  'SAP doc (Defective Receipt) posting date',
   'Defc Recpt Qty',
   'Old barcode',
   'Remarks',
@@ -126,13 +130,16 @@ function line(row: CsvDbRow, sap: SapDocPair): string {
     row.part_category,
     row.part_code,
     sapDocCell(sap.sapDoc, sap.sapDocBarcode),
+    sap.sapDocPostingDate,
     row.part_name,
     row.qty,
     row.new_barcode,
     daysDiffTechSolveCons(visitYmd(row.visit_at), sap.sapDocPostingDate),
     sapDocCell(sap.sapDocDefective, sap.sapDocDefectiveBarcode),
+    sap.sapDocDefectivePostingDate,
     sap.sapDocDefectiveQty,
     sapDocCell(sap.sapDocDefectiveReceipt, sap.sapDocDefectiveReceiptBarcode),
+    sap.sapDocDefectiveReceiptPostingDate,
     sap.sapDocDefectiveReceiptQty,
     row.old_barcode,
     row.remarks,
@@ -141,10 +148,76 @@ function line(row: CsvDbRow, sap: SapDocPair): string {
     .join(',');
 }
 
+function orphanCsvLine(row: CallPartRow): string {
+  return [
+    row.callNo,
+    null,
+    null,
+    null,
+    row.plantName,
+    row.branchName,
+    null,
+    null,
+    null,
+    row.statusLabel,
+    null,
+    null,
+    null,
+    null,
+    null,
+    row.partCode,
+    sapDocCell(row.sapDoc, row.sapDocBarcode),
+    row.sapDocPostingDate,
+    row.partName,
+    row.qty,
+    null,
+    null,
+    sapDocCell(row.sapDocDefective, row.sapDocDefectiveBarcode),
+    row.sapDocDefectivePostingDate,
+    row.sapDocDefectiveQty,
+    sapDocCell(row.sapDocDefectiveReceipt, row.sapDocDefectiveReceiptBarcode),
+    row.sapDocDefectiveReceiptPostingDate,
+    row.sapDocDefectiveReceiptQty,
+    null,
+    null,
+  ]
+    .map((cell) => escapeCsvCell(cell))
+    .join(',');
+}
+
 export function buildCallPartsCsvStream(filters: CallPartsFilters): Response {
-  const { where, params } = buildCallPartsFilterSql(filters);
   const encoder = new TextEncoder();
   const stamp = new Date().toISOString().slice(0, 10);
+
+  if (filters.mb51NotInCrm) {
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          controller.enqueue(encoder.encode('\uFEFF'));
+          controller.enqueue(encoder.encode(`${HEADERS.map((h) => escapeCsvCell(h)).join(',')}\r\n`));
+          const data = await fetchCallPartsRows({
+            ...filters,
+            page: 1,
+            pageSize: Math.min(EXPORT_CAP, 5000),
+          });
+          if (data.rows.length) {
+            controller.enqueue(
+              encoder.encode(`${data.rows.map(orphanCsvLine).join('\r\n')}\r\n`)
+            );
+          }
+          controller.close();
+        } catch (err) {
+          controller.error(err);
+        }
+      },
+    });
+    return responseForCsvStream(
+      stream,
+      csvDownloadHeaders({ fileName: `call-parts-mb51-not-in-crm-${stamp}.csv`, gzip: false })
+    );
+  }
+
+  const { where, params } = buildCallPartsFilterSql(filters);
   let exported = 0;
   const sapDefFilter = Boolean(filters.sapDocDefective.trim());
   const jsSapFilter =

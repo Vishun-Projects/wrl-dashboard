@@ -1,6 +1,7 @@
 import { withAppClient, withBulkReadClient } from '@/lib/read-model/db';
 import {
   buildCallPartsFilterSql,
+  buildMb51NotInCrmSql,
   CALL_PARTS_BRANCH,
   CALL_PARTS_CLIENT,
   CALL_PARTS_CUSTOMER,
@@ -70,6 +71,11 @@ export type CallPartsFilters = CallPartsFilterInput & {
   dir: 'asc' | 'desc';
   /** Post-lookup: only rows with any SAP↔MM barcode mismatch. */
   barcodeMismatch: boolean;
+  /**
+   * MB51 item_text call nos (exact TRN format) with part movements but missing from CRM.
+   * One row per orphan call — not the normal call_parts join.
+   */
+  mb51NotInCrm: boolean;
 };
 
 /** SQL-orderable columns (exist on call_parts / header joins). */
@@ -218,6 +224,7 @@ export function parseCallPartsFilters(
     sapDocDefective: searchParams.get('sapDocDefective')?.trim() ?? '',
     sapDocReceipt: searchParams.get('sapDocReceipt')?.trim() ?? '',
     barcodeMismatch: searchParams.get('barcodeMismatch') === '1',
+    mb51NotInCrm: searchParams.get('mb51NotInCrm') === '1',
     page,
     pageSize,
     sort,
@@ -300,13 +307,16 @@ function mapRow(row: DbRow, matched: SapDocPair | null = null, sapSql = false): 
     city: row.city,
     statusLabel: row.status_label,
     sapDoc: matched?.sapDoc ?? null,
+    sapDocPostingDate: matched?.sapDocPostingDate ?? null,
     sapDocDefective: sapSql
       ? (row.sap_doc_defective ?? null)
       : (matched?.sapDocDefective ?? null),
+    sapDocDefectivePostingDate: matched?.sapDocDefectivePostingDate ?? null,
     sapDocDefectiveQty: sapSql
       ? formatSapQty(row.sap_doc_defective_qty)
       : (matched?.sapDocDefectiveQty ?? null),
     sapDocDefectiveReceipt: matched?.sapDocDefectiveReceipt ?? null,
+    sapDocDefectiveReceiptPostingDate: matched?.sapDocDefectiveReceiptPostingDate ?? null,
     sapDocDefectiveReceiptQty: matched?.sapDocDefectiveReceiptQty ?? null,
     sapDocBarcode: matched?.sapDocBarcode ?? null,
     sapDocBarcodeMismatch: matched?.sapDocBarcodeMismatch ?? false,
@@ -518,7 +528,114 @@ async function fetchEnrichedScanPage(filters: CallPartsFilters): Promise<CallPar
   };
 }
 
+function plantCodeFromFilter(plant: string): string {
+  const raw = plant.trim();
+  if (!raw) return '';
+  return raw.match(/^[0-9]+/)?.[0] ?? raw;
+}
+
+function formatOrphanQty(value: number | string | null | undefined): string | null {
+  if (value == null || value === '') return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n) || n === 0) return null;
+  return Number.isInteger(n) ? String(n) : String(n);
+}
+
+type OrphanDbRow = {
+  call_no: string;
+  plants: string | null;
+  vendors: string | null;
+  materials: string | null;
+  descriptions: string | null;
+  sap_doc: string | null;
+  sap_doc_posting_date: string | null;
+  cons_qty: number | string | null;
+  sap_doc_defective: string | null;
+  sap_doc_defective_posting_date: string | null;
+  defective_qty: number | string | null;
+  sap_doc_receipt: string | null;
+  sap_doc_receipt_posting_date: string | null;
+  receipt_qty: number | string | null;
+  first_posting_date: string | null;
+};
+
+function mapOrphanRow(row: OrphanDbRow): CallPartRow {
+  return {
+    ncode: `mb51:${row.call_no}`,
+    nofficeid: '',
+    callNo: row.call_no,
+    visitNo: null,
+    visitAt: null,
+    partCategory: null,
+    partCode: row.materials,
+    partName: row.descriptions,
+    qty: formatOrphanQty(row.cons_qty),
+    oldBarcode: null,
+    newBarcode: null,
+    consDaysDiff: null,
+    remarks: null,
+    callLoggedAt: null,
+    barcode: null,
+    machineName: null,
+    modelCode: null,
+    plantName: row.plants,
+    branchName: row.vendors,
+    partyName: null,
+    engineerName: null,
+    clientName: null,
+    city: null,
+    statusLabel: 'Not in CRM',
+    sapDoc: row.sap_doc,
+    sapDocPostingDate: row.sap_doc_posting_date,
+    sapDocDefective: row.sap_doc_defective,
+    sapDocDefectivePostingDate: row.sap_doc_defective_posting_date,
+    sapDocDefectiveQty: formatOrphanQty(row.defective_qty),
+    sapDocDefectiveReceipt: row.sap_doc_receipt,
+    sapDocDefectiveReceiptPostingDate: row.sap_doc_receipt_posting_date,
+    sapDocDefectiveReceiptQty: formatOrphanQty(row.receipt_qty),
+    sapDocBarcode: null,
+    sapDocBarcodeMismatch: false,
+    sapDocDefectiveBarcode: null,
+    sapDocDefectiveBarcodeMismatch: false,
+    sapDocDefectiveReceiptBarcode: null,
+    sapDocDefectiveReceiptBarcodeMismatch: false,
+  };
+}
+
+async function fetchMb51NotInCrmRows(filters: CallPartsFilters): Promise<CallPartsRowsResponse> {
+  const { sql, params } = buildMb51NotInCrmSql({
+    allTime: filters.allTime,
+    startDate: filters.startDate,
+    endDate: filters.endDate,
+    search: filters.search,
+    plant: plantCodeFromFilter(filters.plant),
+    part: filters.part,
+    sapDoc: filters.sapDoc,
+    sapDocDefective: filters.sapDocDefective,
+    sapDocReceipt: filters.sapDocReceipt,
+  });
+  const [res, state] = await Promise.all([
+    withBulkReadClient((client) => client.query<OrphanDbRow>(sql, params)),
+    withAppClient((client) =>
+      client.query<{ last_run_at: Date | null }>(`SELECT last_run_at FROM sync_state WHERE entity = $1`, [
+        CALL_PARTS_ENTITY,
+      ])
+    ),
+  ]);
+  let rows = res.rows.map(mapOrphanRow);
+  if (filters.barcodeMismatch) rows = [];
+  const offset = (filters.page - 1) * filters.pageSize;
+  return {
+    rows: rows.slice(offset, offset + filters.pageSize),
+    total: rows.length,
+    page: filters.page,
+    pageSize: filters.pageSize,
+    syncedAt: iso(state.rows[0]?.last_run_at ?? null),
+  };
+}
+
 export async function fetchCallPartsRows(filters: CallPartsFilters): Promise<CallPartsRowsResponse> {
+  if (filters.mb51NotInCrm) return fetchMb51NotInCrmRows(filters);
   if (needsEnrichedScan(filters)) return fetchEnrichedScanPage(filters);
 
   const { where, params } = buildCallPartsFilterSql(filters);
