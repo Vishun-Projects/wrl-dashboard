@@ -102,6 +102,92 @@ const COLS: Record<string, string[]> = {
   plant: ['plant'],
 };
 
+const MB51_FILE_RE = /\.(xlsx|xlsm|xls|csv)$/i;
+
+function pickMb51Files(list: FileList | File[] | null | undefined): File[] {
+  return [...(list ?? [])].filter((f) => MB51_FILE_RE.test(f.name));
+}
+
+function parseMb51AgingWorkbook(
+  wb: XLSX.WorkBook,
+  sheetNames: string[]
+): {
+  rows: Mb51AgingMovement[];
+  miss: string[];
+  qtyCol: string;
+  uomCol: string;
+  uomSeen: Map<string, number>;
+} {
+  const out: Mb51AgingMovement[] = [];
+  const miss: string[] = [];
+  let qtyCol = '';
+  let uomCol = '';
+  const uomSeen = new Map<string, number>();
+
+  for (const sn of sheetNames) {
+    const ws = wb.Sheets[sn];
+    if (!ws) continue;
+    const data: unknown[][] = XLSX.utils.sheet_to_json(ws, {
+      header: 1,
+      raw: true,
+      defval: '',
+    });
+    if (!data.length) continue;
+
+    const hdrRaw = data[0] as unknown[];
+    const hdr = hdrRaw.map(norm);
+    const ix: Record<string, number> = {};
+    for (const k in COLS) {
+      ix[k] = -1;
+      for (const nm of COLS[k]) {
+        const i = hdr.indexOf(nm);
+        if (i >= 0) {
+          ix[k] = i;
+          break;
+        }
+      }
+    }
+    if (!qtyCol && ix.qty >= 0) qtyCol = String(hdrRaw[ix.qty] ?? '');
+    if (!uomCol && ix.uom >= 0) uomCol = String(hdrRaw[ix.uom] ?? '');
+    const need = ['date', 'mat', 'qty'].filter((k) => ix[k] < 0);
+    if (need.length) {
+      miss.push(`${sn}: ${need.join(', ')}`);
+      continue;
+    }
+
+    for (let r = 1; r < data.length; r++) {
+      const row = data[r] as unknown[];
+      const ds = toSerial(row[ix.date]);
+      if (ds == null) continue;
+      const q = Number(row[ix.qty]);
+      if (isNaN(q)) continue;
+      const uo = ix.uom >= 0 ? String(row[ix.uom] ?? '').trim() : '';
+      uomSeen.set(uo, (uomSeen.get(uo) || 0) + 1);
+      const sup = ix.sup >= 0 ? String(row[ix.sup] ?? '').trim() : '';
+      const supn = ix.supn >= 0 ? String(row[ix.supn] ?? '').trim() : '';
+
+      out.push({
+        d: ds,
+        q,
+        m: String(row[ix.mat] ?? '').trim(),
+        md: ix.desc >= 0 ? String(row[ix.desc] ?? '').trim() : '',
+        g: ix.grp >= 0 ? String(row[ix.grp] ?? '').trim() : '',
+        u: uo,
+        v: sup,
+        vn: supn,
+        mv: ix.plant >= 0 ? String(row[ix.plant] ?? '').trim() : '',
+        s: out.length,
+        dc: ix.doc >= 0 ? String(row[ix.doc] ?? '').trim() : '',
+        mt: ix.mov >= 0 ? String(row[ix.mov] ?? '').trim() : '',
+        mtx: ix.movt >= 0 ? String(row[ix.movt] ?? '').trim() : '',
+        tx: ix.text >= 0 ? String(row[ix.text] ?? '').trim() : '',
+      });
+    }
+  }
+
+  return { rows: out, miss, qtyCol, uomCol, uomSeen };
+}
+
 const HEAD: Record<string, [string, string][]> = {
   vendor: [
     ['a', 'Vendor code'],
@@ -633,36 +719,92 @@ export default function Mb51AgingPageClient() {
     activeImportId,
   ]);
 
-  // Save parsed data to backend (chunked — large MB51 JSON cannot go in one POST)
-  const saveRowsToDatabase = async (fileName: string, parsedRows: Mb51AgingMovement[]) => {
-    try {
-      setLoading(true);
-      setIsErrMsg(false);
-      const meta = await saveMb51AgingRows(fileName, parsedRows, {
-        appendToImportId: appendOnUpload ? activeImportId : null,
-        onProgress: (saved, total) => {
-          setLoadMsg(
-            `Saving to database… ${saved.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')} rows`
-          );
-        },
-      });
-      selectImport(meta.id);
-      setLatestImport(meta);
-      setLoadMsg('Building aging snapshot…');
-      await loadSnapshotView('default', meta.id);
-      setLoadMsg('');
-      setIsErrMsg(false);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Database save failed';
-      console.error('[MB51 Save Error]', err);
-      setLoadMsg(
-        `Parsed file locally, but database save failed — data will be lost on reload. ${msg}`
+  const applyUomInfo = useCallback(
+    (
+      out: Mb51AgingMovement[],
+      sheetNames: string[],
+      qtyCol: string,
+      uomCol: string,
+      uomSeen: Map<string, number>
+    ) => {
+      const mu = new Map<string, Set<string>>();
+      for (const r of out) {
+        let s = mu.get(r.m);
+        if (!s) {
+          s = new Set();
+          mu.set(r.m, s);
+        }
+        s.add(r.u);
+      }
+      const multi = [...mu.entries()]
+        .filter(([, s]) => s.size > 1)
+        .map(([m, s]) => `${m} (${[...s].join('/')})`);
+      setUomInfo(
+        `Quantity taken from column "${qtyCol}" and unit from "${uomCol}" (no conversion). Units in data: ${[
+          ...uomSeen.entries(),
+        ]
+          .map(([u, n]) => `${u || '(blank)'} ${n.toLocaleString('en-IN')}`)
+          .join(', ')}.${
+          multi.length
+            ? ` Materials with more than one unit (reported separately): ${multi.join(', ')}.`
+            : ''
+        }`
       );
-      setIsErrMsg(true);
-    } finally {
-      setLoading(false);
-    }
-  };
+      setSheetLabel(sheetNames.join(', '));
+    },
+    []
+  );
+
+  // Save parsed data to backend (chunked — large MB51 JSON cannot go in one POST)
+  const saveRowsToDatabase = useCallback(
+    async (
+      fileName: string,
+      parsedRows: Mb51AgingMovement[],
+      opts?: { appendToImportId?: string | null; manageLoading?: boolean }
+    ) => {
+      const manageLoading = opts?.manageLoading !== false;
+      try {
+        if (manageLoading) {
+          setLoading(true);
+          setIsErrMsg(false);
+        }
+        const appendTo =
+          opts && 'appendToImportId' in opts
+            ? opts.appendToImportId ?? null
+            : appendOnUpload
+              ? activeImportId
+              : null;
+        const meta = await saveMb51AgingRows(fileName, parsedRows, {
+          appendToImportId: appendTo,
+          onProgress: (saved, total) => {
+            setLoadMsg(
+              `Saving to database… ${saved.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')} rows`
+            );
+          },
+        });
+        selectImport(meta.id);
+        setLatestImport(meta);
+        setLoadMsg('Building aging snapshot…');
+        await loadSnapshotView('default', meta.id);
+        const listed = await fetchMb51Meta(meta.id);
+        setImports(listed.imports ?? []);
+        setLoadMsg('');
+        setIsErrMsg(false);
+        return meta;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Database save failed';
+        console.error('[MB51 Save Error]', err);
+        setLoadMsg(
+          `Parsed file locally, but database save failed — data will be lost on reload. ${msg}`
+        );
+        setIsErrMsg(true);
+        throw err;
+      } finally {
+        if (manageLoading) setLoading(false);
+      }
+    },
+    [activeImportId, appendOnUpload, loadSnapshotView, selectImport]
+  );
 
   // Build movement records from sheets
   const processSheets = useCallback(
@@ -672,111 +814,20 @@ export default function Mb51AgingPageClient() {
 
       setTimeout(() => {
         try {
-          const out: Mb51AgingMovement[] = [];
-          const miss: string[] = [];
-          let qtyCol = '';
-          let uomCol = '';
-          const uomSeen = new Map<string, number>();
-
-          sheetNames.forEach((sn) => {
-            const ws = wb.Sheets[sn];
-            if (!ws) return;
-            const data: unknown[][] = XLSX.utils.sheet_to_json(ws, {
-              header: 1,
-              raw: true,
-              defval: '',
-            });
-            if (!data.length) return;
-
-            const hdrRaw = data[0] as unknown[];
-            const hdr = hdrRaw.map(norm);
-            const ix: Record<string, number> = {};
-            // Prefer alias order from COLS (Quantity before Qty in unit of entry)
-            for (const k in COLS) {
-              ix[k] = -1;
-              for (const nm of COLS[k]) {
-                const i = hdr.indexOf(nm);
-                if (i >= 0) {
-                  ix[k] = i;
-                  break;
-                }
-              }
-            }
-            if (!qtyCol && ix.qty >= 0) qtyCol = String(hdrRaw[ix.qty] ?? '');
-            if (!uomCol && ix.uom >= 0) uomCol = String(hdrRaw[ix.uom] ?? '');
-            const need = ['date', 'mat', 'qty'].filter((k) => ix[k] < 0);
-            if (need.length) {
-              miss.push(`${sn}: ${need.join(', ')}`);
-              return;
-            }
-
-            for (let r = 1; r < data.length; r++) {
-              const row = data[r] as unknown[];
-              const ds = toSerial(row[ix.date]);
-              if (ds == null) continue;
-              const q = Number(row[ix.qty]);
-              if (isNaN(q)) continue;
-              const uo = ix.uom >= 0 ? String(row[ix.uom] ?? '').trim() : '';
-              uomSeen.set(uo, (uomSeen.get(uo) || 0) + 1);
-              const sup = ix.sup >= 0 ? String(row[ix.sup] ?? '').trim() : '';
-              const supn = ix.supn >= 0 ? String(row[ix.supn] ?? '').trim() : '';
-
-              out.push({
-                d: ds,
-                q,
-                m: String(row[ix.mat] ?? '').trim(),
-                md: ix.desc >= 0 ? String(row[ix.desc] ?? '').trim() : '',
-                g: ix.grp >= 0 ? String(row[ix.grp] ?? '').trim() : '',
-                u: uo,
-                v: sup,
-                vn: supn,
-                mv: ix.plant >= 0 ? String(row[ix.plant] ?? '').trim() : '',
-                s: out.length,
-                dc: ix.doc >= 0 ? String(row[ix.doc] ?? '').trim() : '',
-                mt: ix.mov >= 0 ? String(row[ix.mov] ?? '').trim() : '',
-                mtx: ix.movt >= 0 ? String(row[ix.movt] ?? '').trim() : '',
-                tx: ix.text >= 0 ? String(row[ix.text] ?? '').trim() : '',
-              });
-            }
-          });
-
-          if (!out.length) {
+          const parsed = parseMb51AgingWorkbook(wb, sheetNames);
+          if (!parsed.rows.length) {
             setLoadMsg(
-              'No usable rows found.' + (miss.length ? ' Missing columns → ' + miss.join(' | ') : '')
+              'No usable rows found.' +
+                (parsed.miss.length ? ' Missing columns → ' + parsed.miss.join(' | ') : '')
             );
             setIsErrMsg(true);
             return;
           }
 
-          const mu = new Map<string, Set<string>>();
-          for (const r of out) {
-            let s = mu.get(r.m);
-            if (!s) {
-              s = new Set();
-              mu.set(r.m, s);
-            }
-            s.add(r.u);
-          }
-          const multi = [...mu.entries()]
-            .filter(([, s]) => s.size > 1)
-            .map(([m, s]) => `${m} (${[...s].join('/')})`);
-          setUomInfo(
-            `Quantity taken from column "${qtyCol}" and unit from "${uomCol}" (no conversion). Units in data: ${[
-              ...uomSeen.entries(),
-            ]
-              .map(([u, n]) => `${u || '(blank)'} ${n.toLocaleString('en-IN')}`)
-              .join(', ')}.${
-              multi.length
-                ? ` Materials with more than one unit (reported separately): ${multi.join(', ')}.`
-                : ''
-            }`
-          );
-          setSheetLabel(sheetNames.join(', '));
+          applyUomInfo(parsed.rows, sheetNames, parsed.qtyCol, parsed.uomCol, parsed.uomSeen);
           setAvailableSheets([]);
           setWbInstance(null);
-
-          // Save to database (snapshot built on finalize; then fast KPI load)
-          void saveRowsToDatabase(fileName, out);
+          void saveRowsToDatabase(fileName, parsed.rows).then(() => setShowUpload(false));
         } catch (err: unknown) {
           console.error(err);
           const msg = err instanceof Error ? err.message : 'Error processing sheets';
@@ -785,57 +836,132 @@ export default function Mb51AgingPageClient() {
         }
       }, 30);
     },
-    []
+    [applyUomInfo, saveRowsToDatabase]
   );
 
-  // File loading
+  const readWorkbookFile = (f: File): Promise<XLSX.WorkBook> =>
+    new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onerror = () => reject(new Error(`Could not read ${f.name}`));
+      fr.onload = () => {
+        try {
+          resolve(
+            XLSX.read(new Uint8Array(fr.result as ArrayBuffer), {
+              type: 'array',
+              cellDates: false,
+              dense: true,
+            })
+          );
+        } catch (err) {
+          reject(err);
+        }
+      };
+      fr.readAsArrayBuffer(f);
+    });
+
+  /** Several files at once: each becomes its own import (or all append when checkbox is on). */
+  const importManyFiles = useCallback(
+    async (files: File[]) => {
+      setLoading(true);
+      setIsErrMsg(false);
+      setAvailableSheets([]);
+      setWbInstance(null);
+      let appendId: string | null = appendOnUpload ? activeImportId : null;
+      const errors: string[] = [];
+      let lastId: string | null = null;
+      try {
+        for (let i = 0; i < files.length; i++) {
+          const f = files[i];
+          setLoadMsg(`Reading ${i + 1}/${files.length}: ${f.name}…`);
+          const wb = await readWorkbookFile(f);
+          const parsed = parseMb51AgingWorkbook(wb, wb.SheetNames);
+          if (!parsed.rows.length) {
+            errors.push(
+              `${f.name}: no usable rows` +
+                (parsed.miss.length ? ` (${parsed.miss.join(' | ')})` : '')
+            );
+            continue;
+          }
+          applyUomInfo(parsed.rows, wb.SheetNames, parsed.qtyCol, parsed.uomCol, parsed.uomSeen);
+          setLoadMsg(
+            `Saving ${i + 1}/${files.length}: ${f.name} (${parsed.rows.length.toLocaleString('en-IN')} rows)…`
+          );
+          const meta = await saveRowsToDatabase(f.name, parsed.rows, {
+            appendToImportId: appendId,
+            manageLoading: false,
+          });
+          lastId = meta.id;
+          if (appendOnUpload) appendId = meta.id;
+        }
+        if (!lastId) {
+          setLoadMsg(errors.join('; ') || 'No files imported');
+          setIsErrMsg(true);
+          return;
+        }
+        setShowUpload(false);
+        setLoadMsg(
+          errors.length
+            ? `Imported ${files.length - errors.length} of ${files.length} files. ${errors.join('; ')}`
+            : `Imported ${files.length} file${files.length === 1 ? '' : 's'}.`
+        );
+        setIsErrMsg(errors.length > 0);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Multi-file import failed';
+        setLoadMsg(msg);
+        setIsErrMsg(true);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [activeImportId, appendOnUpload, applyUomInfo, saveRowsToDatabase]
+  );
+
+  // File loading — single file keeps sheet picker; multi skips straight to import
   const handleFile = (f: File) => {
     setLoadMsg(`Reading ${f.name} … please wait`);
     setIsErrMsg(false);
     setAvailableSheets([]);
 
-    const fr = new FileReader();
-    fr.onerror = () => {
-      setLoadMsg('Could not read the file.');
-      setIsErrMsg(true);
-    };
-    fr.onload = () => {
-      setTimeout(() => {
-        try {
-          const wb = XLSX.read(new Uint8Array(fr.result as ArrayBuffer), {
-            type: 'array',
-            cellDates: false,
-            dense: true,
+    void readWorkbookFile(f)
+      .then((wb) => {
+        setWbInstance(wb);
+        const names = wb.SheetNames;
+        if (names.length > 1) {
+          const list = names.map((n) => {
+            const ws = wb.Sheets[n] as unknown as { '!data'?: unknown[] } | unknown[];
+            const rowCount = Array.isArray(ws)
+              ? ws.length
+              : ws?.['!data']
+                ? ws['!data'].length
+                : 0;
+            return { name: n, rowCount };
           });
-          setWbInstance(wb);
-          const names = wb.SheetNames;
-          if (names.length > 1) {
-            const list = names.map((n) => {
-              const ws = wb.Sheets[n] as unknown as { '!data'?: unknown[] } | unknown[];
-              const rowCount = Array.isArray(ws)
-                ? ws.length
-                : ws?.['!data']
-                  ? ws['!data'].length
-                  : 0;
-              return { name: n, rowCount };
-            });
-            setAvailableSheets(list);
-            setSelectedSheets(new Set(names));
-            setLoadMsg(
-              `Workbook has ${names.length} sheets – tick the sheets that hold movement data, then click Load.`
-            );
-          } else {
-            processSheets(wb, names, f.name);
-          }
-        } catch (err: unknown) {
-          console.error(err);
-          const msg = err instanceof Error ? err.message : 'Failed to parse file';
-          setLoadMsg(`Failed to parse: ${msg}`);
-          setIsErrMsg(true);
+          setAvailableSheets(list);
+          setSelectedSheets(new Set(names));
+          setLoadMsg(
+            `Workbook has ${names.length} sheets – tick the sheets that hold movement data, then click Load.`
+          );
+        } else {
+          processSheets(wb, names, f.name);
         }
-      }, 30);
-    };
-    fr.readAsArrayBuffer(f);
+      })
+      .catch((err: unknown) => {
+        console.error(err);
+        const msg = err instanceof Error ? err.message : 'Failed to parse file';
+        setLoadMsg(`Failed to parse: ${msg}`);
+        setIsErrMsg(true);
+      });
+  };
+
+  const handleFiles = (list: FileList | File[] | null) => {
+    const files = pickMb51Files(list);
+    if (!files.length) {
+      setLoadMsg('Select .xlsx / .xls / .csv MB51 export files.');
+      setIsErrMsg(true);
+      return;
+    }
+    if (files.length === 1) handleFile(files[0]);
+    else void importManyFiles(files);
   };
 
   const handleResetFilters = () => {
@@ -1200,24 +1326,25 @@ export default function Mb51AgingPageClient() {
               onDrop={(e) => {
                 e.preventDefault();
                 setIsDragging(false);
-                const f = e.dataTransfer.files[0];
-                if (f) handleFile(f);
+                handleFiles(e.dataTransfer.files);
               }}
             >
-              <b>Select or drop the MB51 export (.xlsx / .xls / .csv)</b>
+              <b>Select or drop one or more MB51 exports (.xlsx / .xls / .csv)</b>
               <div className="msg">
                 Required columns: Posting Date, Material, Material Description, Material Group,
-                Qty in unit of entry, Supplier, Supplier Name
+                Qty in unit of entry, Supplier, Supplier Name. Multi-select creates a separate
+                import per file (or appends all when the checkbox below is on).
               </div>
               <p>
                 <input
                   type="file"
                   id="file"
                   accept=".xlsx,.xlsm,.xls,.csv"
+                  multiple
                   disabled={loading}
                   onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) handleFile(f);
+                    handleFiles(e.target.files);
+                    e.currentTarget.value = '';
                   }}
                 />
               </p>

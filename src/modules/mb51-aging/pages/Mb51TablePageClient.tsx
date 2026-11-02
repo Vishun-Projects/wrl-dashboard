@@ -132,6 +132,88 @@ const COLS: Record<string, string[]> = {
   plant: ['plant'],
 };
 
+const MB51_FILE_RE = /\.(xlsx|xlsm|xls|csv)$/i;
+
+function pickMb51Files(list: FileList | File[] | null | undefined): File[] {
+  return [...(list ?? [])].filter((f) => MB51_FILE_RE.test(f.name));
+}
+
+function parseMb51TableWorkbook(
+  workbook: XLSX.WorkBook,
+  sheetNames: string[]
+): { rows: MovementRow[]; missingColumns: string[]; skipped: number } {
+  const output: MovementRow[] = [];
+  const missingColumns: string[] = [];
+  let skipped = 0;
+
+  for (const sheetName of sheetNames) {
+    const worksheet = workbook.Sheets[sheetName];
+    if (!worksheet) continue;
+
+    const data = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
+      header: 1,
+      raw: true,
+      defval: '',
+    });
+    if (!data.length) continue;
+
+    const headers = (data[0] as unknown[]).map(norm);
+    const indexes: Record<string, number> = {};
+    for (const key in COLS) {
+      indexes[key] = -1;
+      for (const alias of COLS[key]) {
+        const i = headers.indexOf(alias);
+        if (i >= 0) {
+          indexes[key] = i;
+          break;
+        }
+      }
+    }
+
+    const required = ['date', 'mat', 'qty'].filter((key) => indexes[key] < 0);
+    if (required.length) {
+      missingColumns.push(`${sheetName}: ${required.join(', ')}`);
+      continue;
+    }
+
+    for (let rowIndex = 1; rowIndex < data.length; rowIndex++) {
+      const sourceRow = data[rowIndex] as unknown[];
+      const dateSerial = toSerial(sourceRow[indexes.date]);
+      if (dateSerial == null) {
+        skipped++;
+        continue;
+      }
+
+      const quantityValue = Number(sourceRow[indexes.qty]);
+      if (!Number.isFinite(quantityValue)) {
+        skipped++;
+        continue;
+      }
+
+      const supplier = indexes.sup >= 0 ? asString(sourceRow[indexes.sup]) : '';
+      const supplierName = indexes.supn >= 0 ? asString(sourceRow[indexes.supn]) : '';
+      output.push({
+        d: dateSerial,
+        q: quantityValue,
+        m: indexes.mat >= 0 ? asString(sourceRow[indexes.mat]) : '',
+        md: indexes.desc >= 0 ? asString(sourceRow[indexes.desc]) : '',
+        g: indexes.grp >= 0 ? asString(sourceRow[indexes.grp]) : '',
+        u: indexes.uom >= 0 ? asString(sourceRow[indexes.uom]) : '',
+        v: supplier,
+        vn: supplierName,
+        mv: indexes.plant >= 0 ? asString(sourceRow[indexes.plant]) : '',
+        s: output.length,
+        dc: indexes.doc >= 0 ? asString(sourceRow[indexes.doc]) : '',
+        mt: indexes.mov >= 0 ? asString(sourceRow[indexes.mov]) : '',
+        mtx: indexes.movt >= 0 ? asString(sourceRow[indexes.movt]) : '',
+        tx: indexes.text >= 0 ? asString(sourceRow[indexes.text]) : '',
+      });
+    }
+  }
+
+  return { rows: output, missingColumns, skipped };
+}
+
 function MultiSelectDropdown({
   label,
   items,
@@ -483,48 +565,67 @@ export default function Mb51TablePageClient() {
   const movOptions = facetMovements;
 
   // Save imported rows to the database (chunked — same store as Aging report)
-  const saveRowsToDatabase = useCallback(async (fileName: string, movementRows: MovementRow[]) => {
-    try {
-      setLoading(true);
-      setIsErrMsg(false);
-      const meta = await saveMb51AgingRows(fileName, movementRows as Mb51AgingMovement[], {
-        appendToImportId: appendOnUpload ? activeImportId : null,
-        onProgress: (saved, total) => {
-          setLoadMsg(
-            `Saving to database… ${saved.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')} rows`
-          );
-        },
-      });
-      selectImport(meta.id);
-      setLatestImport(meta);
-      const listed = await fetchMb51Meta(meta.id);
-      setImports(listed.imports ?? []);
-      setLoadMsg('Building aging snapshot…');
-      const facets = await fetchMb51Facets('', meta.id);
-      const toOpt = (xs: { id: string; text: string }[]) =>
-        xs.map((x) => ({ id: x.id, text: x.text, lc: x.text.toLowerCase() }));
-      setFacetVendors(toOpt(facets.vendors));
-      setFacetGroups(toOpt(facets.groups));
-      setFacetMaterials(toOpt(facets.materials));
-      setFacetPlants(toOpt(facets.plants));
-      setFacetMovements(toOpt(facets.movements));
-      setPage(1);
-      setLoadMsg(
-        `Import has ${meta.rowCount.toLocaleString('en-IN')} rows (${meta.fileName}).`
-      );
-      setIsErrMsg(false);
-      setShowUpload(false);
-    } catch (error: unknown) {
-      console.error(error);
-      const message = error instanceof Error ? error.message : 'Database save failed';
-      setLoadMsg(
-        `Parsed file locally, but database save failed — data will be lost on reload. ${message}`
-      );
-      setIsErrMsg(true);
-    } finally {
-      setLoading(false);
-    }
-  }, [activeImportId, appendOnUpload, selectImport]);
+  const saveRowsToDatabase = useCallback(
+    async (
+      fileName: string,
+      movementRows: MovementRow[],
+      opts?: { appendToImportId?: string | null; manageLoading?: boolean; hideUpload?: boolean }
+    ) => {
+      const manageLoading = opts?.manageLoading !== false;
+      const hideUpload = opts?.hideUpload !== false;
+      try {
+        if (manageLoading) {
+          setLoading(true);
+          setIsErrMsg(false);
+        }
+        const appendTo =
+          opts && 'appendToImportId' in opts
+            ? opts.appendToImportId ?? null
+            : appendOnUpload
+              ? activeImportId
+              : null;
+        const meta = await saveMb51AgingRows(fileName, movementRows as Mb51AgingMovement[], {
+          appendToImportId: appendTo,
+          onProgress: (saved, total) => {
+            setLoadMsg(
+              `Saving to database… ${saved.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')} rows`
+            );
+          },
+        });
+        selectImport(meta.id);
+        setLatestImport(meta);
+        const listed = await fetchMb51Meta(meta.id);
+        setImports(listed.imports ?? []);
+        setLoadMsg('Building aging snapshot…');
+        const facets = await fetchMb51Facets('', meta.id);
+        const toOpt = (xs: { id: string; text: string }[]) =>
+          xs.map((x) => ({ id: x.id, text: x.text, lc: x.text.toLowerCase() }));
+        setFacetVendors(toOpt(facets.vendors));
+        setFacetGroups(toOpt(facets.groups));
+        setFacetMaterials(toOpt(facets.materials));
+        setFacetPlants(toOpt(facets.plants));
+        setFacetMovements(toOpt(facets.movements));
+        setPage(1);
+        setLoadMsg(
+          `Import has ${meta.rowCount.toLocaleString('en-IN')} rows (${meta.fileName}).`
+        );
+        setIsErrMsg(false);
+        if (hideUpload) setShowUpload(false);
+        return meta;
+      } catch (error: unknown) {
+        console.error(error);
+        const message = error instanceof Error ? error.message : 'Database save failed';
+        setLoadMsg(
+          `Parsed file locally, but database save failed — data will be lost on reload. ${message}`
+        );
+        setIsErrMsg(true);
+        throw error;
+      } finally {
+        if (manageLoading) setLoading(false);
+      }
+    },
+    [activeImportId, appendOnUpload, selectImport]
+  );
 
   const switchImport = useCallback(
     async (id: string) => {
@@ -572,80 +673,16 @@ export default function Mb51TablePageClient() {
 
       window.setTimeout(() => {
         try {
-          const output: MovementRow[] = [];
-          const missingColumns: string[] = [];
-          let skipped = 0;
-
-          sheetNames.forEach((sheetName) => {
-            const worksheet = workbook.Sheets[sheetName];
-            if (!worksheet) return;
-
-            const data = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
-              header: 1,
-              raw: true,
-              defval: '',
-            });
-            if (!data.length) return;
-
-            const headers = (data[0] as unknown[]).map(norm);
-            const indexes: Record<string, number> = {};
-            for (const key in COLS) {
-              indexes[key] = -1;
-              for (const alias of COLS[key]) {
-                const i = headers.indexOf(alias);
-                if (i >= 0) {
-                  indexes[key] = i;
-                  break;
-                }
-              }
-            }
-
-            const required = ['date', 'mat', 'qty'].filter((key) => indexes[key] < 0);
-            if (required.length) {
-              missingColumns.push(`${sheetName}: ${required.join(', ')}`);
-              return;
-            }
-
-            for (let rowIndex = 1; rowIndex < data.length; rowIndex++) {
-              const sourceRow = data[rowIndex] as unknown[];
-              const dateSerial = toSerial(sourceRow[indexes.date]);
-              if (dateSerial == null) {
-                skipped++;
-                continue;
-              }
-
-              const quantityValue = Number(sourceRow[indexes.qty]);
-              if (!Number.isFinite(quantityValue)) {
-                skipped++;
-                continue;
-              }
-
-              const supplier = indexes.sup >= 0 ? asString(sourceRow[indexes.sup]) : '';
-              const supplierName = indexes.supn >= 0 ? asString(sourceRow[indexes.supn]) : '';
-              output.push({
-                d: dateSerial,
-                q: quantityValue,
-                m: indexes.mat >= 0 ? asString(sourceRow[indexes.mat]) : '',
-                md: indexes.desc >= 0 ? asString(sourceRow[indexes.desc]) : '',
-                g: indexes.grp >= 0 ? asString(sourceRow[indexes.grp]) : '',
-                u: indexes.uom >= 0 ? asString(sourceRow[indexes.uom]) : '',
-                v: supplier,
-                vn: supplierName,
-                mv: indexes.plant >= 0 ? asString(sourceRow[indexes.plant]) : '',
-                s: output.length,
-                dc: indexes.doc >= 0 ? asString(sourceRow[indexes.doc]) : '',
-                mt: indexes.mov >= 0 ? asString(sourceRow[indexes.mov]) : '',
-                mtx: indexes.movt >= 0 ? asString(sourceRow[indexes.movt]) : '',
-                tx: indexes.text >= 0 ? asString(sourceRow[indexes.text]) : '',
-              });
-            }
-          });
+          const { rows: output, missingColumns, skipped } = parseMb51TableWorkbook(
+            workbook,
+            sheetNames
+          );
 
           if (!output.length) {
             setLoadMsg(
               'No usable rows found.' +
-              (missingColumns.length ? ` Missing columns → ${missingColumns.join(' | ')}` : '') +
-              (skipped ? ` Skipped ${skipped} invalid rows.` : ''),
+                (missingColumns.length ? ` Missing columns → ${missingColumns.join(' | ')}` : '') +
+                (skipped ? ` Skipped ${skipped} invalid rows.` : '')
             );
             setIsErrMsg(true);
             return;
@@ -656,7 +693,11 @@ export default function Mb51TablePageClient() {
           setWbInstance(null);
           initFromRows(output);
           void saveRowsToDatabase(fileName, output);
-          if (skipped) setLoadMsg(`Parsed ${output.length.toLocaleString('en-IN')} rows; skipped ${skipped} invalid rows. Saving to database…`);
+          if (skipped) {
+            setLoadMsg(
+              `Parsed ${output.length.toLocaleString('en-IN')} rows; skipped ${skipped} invalid rows. Saving to database…`
+            );
+          }
         } catch (error: unknown) {
           console.error(error);
           const message = error instanceof Error ? error.message : 'Error processing sheets';
@@ -665,10 +706,87 @@ export default function Mb51TablePageClient() {
         }
       }, 30);
     },
-    [initFromRows, saveRowsToDatabase],
+    [initFromRows, saveRowsToDatabase]
   );
 
-  // Read an Excel/CSV file in the browser
+  const readWorkbookFile = (file: File): Promise<XLSX.WorkBook> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+      reader.onload = (event) => {
+        try {
+          const result = event.target?.result;
+          if (!(result instanceof ArrayBuffer)) {
+            throw new Error('The selected file could not be read.');
+          }
+          resolve(XLSX.read(result, { type: 'array', cellDates: true, raw: true }));
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    });
+
+  /** Several files at once: each becomes its own import (or all append when checkbox is on). */
+  const importManyFiles = useCallback(
+    async (files: File[]) => {
+      setLoading(true);
+      setIsErrMsg(false);
+      setAvailableSheets([]);
+      setSelectedSheets(new Set());
+      setWbInstance(null);
+      let appendId: string | null = appendOnUpload ? activeImportId : null;
+      const errors: string[] = [];
+      let lastMeta: Mb51AgingImportMeta | null = null;
+      try {
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          setWorkbookFileName(file.name);
+          setLoadMsg(`Reading ${i + 1}/${files.length}: ${file.name}…`);
+          const workbook = await readWorkbookFile(file);
+          const parsed = parseMb51TableWorkbook(workbook, workbook.SheetNames);
+          if (!parsed.rows.length) {
+            errors.push(
+              `${file.name}: no usable rows` +
+                (parsed.missingColumns.length ? ` (${parsed.missingColumns.join(' | ')})` : '')
+            );
+            continue;
+          }
+          initFromRows(parsed.rows);
+          setLoadMsg(
+            `Saving ${i + 1}/${files.length}: ${file.name} (${parsed.rows.length.toLocaleString('en-IN')} rows)…`
+          );
+          lastMeta = await saveRowsToDatabase(file.name, parsed.rows, {
+            appendToImportId: appendId,
+            manageLoading: false,
+            hideUpload: false,
+          });
+          if (appendOnUpload) appendId = lastMeta.id;
+        }
+        if (!lastMeta) {
+          setLoadMsg(errors.join('; ') || 'No files imported');
+          setIsErrMsg(true);
+          return;
+        }
+        setShowUpload(false);
+        setLoadMsg(
+          errors.length
+            ? `Imported ${files.length - errors.length} of ${files.length} files. ${errors.join('; ')}`
+            : `Imported ${files.length} file${files.length === 1 ? '' : 's'}.`
+        );
+        setIsErrMsg(errors.length > 0);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Multi-file import failed';
+        setLoadMsg(message);
+        setIsErrMsg(true);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [activeImportId, appendOnUpload, initFromRows, saveRowsToDatabase]
+  );
+
+  // Read an Excel/CSV file in the browser (sheet picker when one multi-sheet workbook)
   const handleFile = (file: File) => {
     setWorkbookFileName(file.name);
     setLoadMsg(`Reading ${file.name} … please wait`);
@@ -676,47 +794,46 @@ export default function Mb51TablePageClient() {
     setAvailableSheets([]);
     setSelectedSheets(new Set());
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      window.setTimeout(() => {
-        try {
-          const result = event.target?.result;
-          if (!(result instanceof ArrayBuffer)) throw new Error('The selected file could not be read.');
-          const workbook = XLSX.read(result, { type: 'array', cellDates: true, raw: true });
-          setWbInstance(workbook);
-
-          if (workbook.SheetNames.length === 1) {
-            processSheets(workbook, workbook.SheetNames, file.name);
-          } else if (workbook.SheetNames.length > 1) {
-            const list: SheetOption[] = workbook.SheetNames.map((sheetName) => {
-              const worksheet = workbook.Sheets[sheetName];
-              const range = worksheet?.['!ref'] ? XLSX.utils.decode_range(worksheet['!ref']) : null;
-              return { name: sheetName, rowCount: range ? Math.max(0, range.e.r) : 0 };
-            });
-            setAvailableSheets(list);
-            const defaultSelection = new Set<string>();
-            const largest = list.find((sheet) => sheet.rowCount > 5);
-            if (largest) defaultSelection.add(largest.name);
-            else if (list[0]) defaultSelection.add(list[0].name);
-            setSelectedSheets(defaultSelection);
-            setLoadMsg(`Workbook contains ${list.length} sheets. Choose which ones to load:`);
-          } else {
-            setLoadMsg('The selected workbook contains no sheets.');
-            setIsErrMsg(true);
-          }
-        } catch (error: unknown) {
-          console.error(error);
-          const message = error instanceof Error ? error.message : 'Failed to parse file';
-          setLoadMsg(`Failed to parse: ${message}`);
+    void readWorkbookFile(file)
+      .then((workbook) => {
+        setWbInstance(workbook);
+        if (workbook.SheetNames.length === 1) {
+          processSheets(workbook, workbook.SheetNames, file.name);
+        } else if (workbook.SheetNames.length > 1) {
+          const list: SheetOption[] = workbook.SheetNames.map((sheetName) => {
+            const worksheet = workbook.Sheets[sheetName];
+            const range = worksheet?.['!ref'] ? XLSX.utils.decode_range(worksheet['!ref']) : null;
+            return { name: sheetName, rowCount: range ? Math.max(0, range.e.r) : 0 };
+          });
+          setAvailableSheets(list);
+          const defaultSelection = new Set<string>();
+          const largest = list.find((sheet) => sheet.rowCount > 5);
+          if (largest) defaultSelection.add(largest.name);
+          else if (list[0]) defaultSelection.add(list[0].name);
+          setSelectedSheets(defaultSelection);
+          setLoadMsg(`Workbook contains ${list.length} sheets. Choose which ones to load:`);
+        } else {
+          setLoadMsg('The selected workbook contains no sheets.');
           setIsErrMsg(true);
         }
-      }, 30);
-    };
-    reader.onerror = () => {
-      setLoadMsg(`Failed to read ${file.name}.`);
+      })
+      .catch((error: unknown) => {
+        console.error(error);
+        const message = error instanceof Error ? error.message : 'Failed to parse file';
+        setLoadMsg(`Failed to parse: ${message}`);
+        setIsErrMsg(true);
+      });
+  };
+
+  const handleFiles = (list: FileList | File[] | null) => {
+    const files = pickMb51Files(list);
+    if (!files.length) {
+      setLoadMsg('Select .xlsx / .xls / .csv MB51 export files.');
       setIsErrMsg(true);
-    };
-    reader.readAsArrayBuffer(file);
+      return;
+    }
+    if (files.length === 1) handleFile(files[0]);
+    else void importManyFiles(files);
   };
 
   const handleResetFilters = () => {
@@ -861,23 +978,24 @@ export default function Mb51TablePageClient() {
               onDrop={(event) => {
                 event.preventDefault();
                 setIsDragging(false);
-                const file = event.dataTransfer.files[0];
-                if (file) handleFile(file);
+                handleFiles(event.dataTransfer.files);
               }}
             >
-              <b>Select or drop the MB51 export (.xlsx / .xls / .csv)</b>
+              <b>Select or drop one or more MB51 exports (.xlsx / .xls / .csv)</b>
               <div className="msg">
-                Required columns: Posting Date, Material, Qty in unit of entry. Supplier, description, group, plant and movement details are optional.
+                Required columns: Posting Date, Material, Qty in unit of entry. Supplier, description,
+                group, plant and movement details are optional. Multi-select creates a separate
+                import per file (or appends all when the checkbox below is on).
               </div>
               <p>
                 <input
                   type="file"
                   id="file"
                   accept=".xlsx,.xlsm,.xls,.csv"
+                  multiple
                   disabled={loading}
                   onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) handleFile(file);
+                    handleFiles(event.target.files);
                     event.currentTarget.value = '';
                   }}
                 />
