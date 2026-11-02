@@ -21,6 +21,11 @@ import {
 } from '@/modules/mb51-aging/api-client';
 import { saveMb51AgingRows } from '@/modules/mb51-aging/save-client';
 import {
+  downloadMb51TemplateCsv,
+  formatMb51ParseFailure,
+  parseMb51Workbook,
+} from '@/modules/mb51-aging/parse-workbook';
+import {
   BUCKETS,
   DEFAULT_DEFECTIVE_MATERIALS,
   bucketOf,
@@ -50,20 +55,6 @@ const serialToDMY = (n: number): string => {
   return `${i.slice(8, 10)}.${i.slice(5, 7)}.${i.slice(0, 4)}`;
 };
 
-function toSerial(v: unknown): number | null {
-  if (v == null || v === '') return null;
-  if (typeof v === 'number') return Math.floor(v);
-  if (v instanceof Date) {
-    return Math.floor(Date.UTC(v.getFullYear(), v.getMonth(), v.getDate()) / DAY + EPOCH_OFFSET);
-  }
-  const s = String(v).trim();
-  let m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/);
-  if (m) return Date.UTC(+m[3], +m[2] - 1, +m[1]) / DAY + EPOCH_OFFSET;
-  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3]) / DAY + EPOCH_OFFSET;
-  return null;
-}
-
 /** Table / modal — whole numbers. */
 const fmtQty = (v: number): string => {
   if (v === 0 || Math.abs(v) < 1e-9) return '–';
@@ -80,112 +71,10 @@ const fmtQtyDec = (v: number): string => {
   return v < 0 ? `(${s})` : s;
 };
 
-const norm = (s: unknown) =>
-  String(s == null ? '' : s)
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-
-/** Match MB51_Aging_Report.html — prefer Quantity + Base Unit of Measure when both exist. */
-const COLS: Record<string, string[]> = {
-  date: ['postingdate'],
-  mat: ['material'],
-  desc: ['materialdescription'],
-  grp: ['materialgroup'],
-  qty: ['quantity', 'qtyinunitofentry', 'qty'],
-  sup: ['supplier', 'vendor'],
-  supn: ['suppliername', 'vendorname'],
-  uom: ['baseunitofmeasure', 'unitofentry', 'uom'],
-  mov: ['movementtype'],
-  movt: ['movementtypetext'],
-  text: ['text'],
-  doc: ['materialdocument'],
-  plant: ['plant'],
-};
-
 const MB51_FILE_RE = /\.(xlsx|xlsm|xls|csv)$/i;
 
 function pickMb51Files(list: FileList | File[] | null | undefined): File[] {
   return [...(list ?? [])].filter((f) => MB51_FILE_RE.test(f.name));
-}
-
-function parseMb51AgingWorkbook(
-  wb: XLSX.WorkBook,
-  sheetNames: string[]
-): {
-  rows: Mb51AgingMovement[];
-  miss: string[];
-  qtyCol: string;
-  uomCol: string;
-  uomSeen: Map<string, number>;
-} {
-  const out: Mb51AgingMovement[] = [];
-  const miss: string[] = [];
-  let qtyCol = '';
-  let uomCol = '';
-  const uomSeen = new Map<string, number>();
-
-  for (const sn of sheetNames) {
-    const ws = wb.Sheets[sn];
-    if (!ws) continue;
-    const data: unknown[][] = XLSX.utils.sheet_to_json(ws, {
-      header: 1,
-      raw: true,
-      defval: '',
-    });
-    if (!data.length) continue;
-
-    const hdrRaw = data[0] as unknown[];
-    const hdr = hdrRaw.map(norm);
-    const ix: Record<string, number> = {};
-    for (const k in COLS) {
-      ix[k] = -1;
-      for (const nm of COLS[k]) {
-        const i = hdr.indexOf(nm);
-        if (i >= 0) {
-          ix[k] = i;
-          break;
-        }
-      }
-    }
-    if (!qtyCol && ix.qty >= 0) qtyCol = String(hdrRaw[ix.qty] ?? '');
-    if (!uomCol && ix.uom >= 0) uomCol = String(hdrRaw[ix.uom] ?? '');
-    const need = ['date', 'mat', 'qty'].filter((k) => ix[k] < 0);
-    if (need.length) {
-      miss.push(`${sn}: ${need.join(', ')}`);
-      continue;
-    }
-
-    for (let r = 1; r < data.length; r++) {
-      const row = data[r] as unknown[];
-      const ds = toSerial(row[ix.date]);
-      if (ds == null) continue;
-      const q = Number(row[ix.qty]);
-      if (isNaN(q)) continue;
-      const uo = ix.uom >= 0 ? String(row[ix.uom] ?? '').trim() : '';
-      uomSeen.set(uo, (uomSeen.get(uo) || 0) + 1);
-      const sup = ix.sup >= 0 ? String(row[ix.sup] ?? '').trim() : '';
-      const supn = ix.supn >= 0 ? String(row[ix.supn] ?? '').trim() : '';
-
-      out.push({
-        d: ds,
-        q,
-        m: String(row[ix.mat] ?? '').trim(),
-        md: ix.desc >= 0 ? String(row[ix.desc] ?? '').trim() : '',
-        g: ix.grp >= 0 ? String(row[ix.grp] ?? '').trim() : '',
-        u: uo,
-        v: sup,
-        vn: supn,
-        mv: ix.plant >= 0 ? String(row[ix.plant] ?? '').trim() : '',
-        s: out.length,
-        dc: ix.doc >= 0 ? String(row[ix.doc] ?? '').trim() : '',
-        mt: ix.mov >= 0 ? String(row[ix.mov] ?? '').trim() : '',
-        mtx: ix.movt >= 0 ? String(row[ix.movt] ?? '').trim() : '',
-        tx: ix.text >= 0 ? String(row[ix.text] ?? '').trim() : '',
-      });
-    }
-  }
-
-  return { rows: out, miss, qtyCol, uomCol, uomSeen };
 }
 
 const HEAD: Record<string, [string, string][]> = {
@@ -815,12 +704,9 @@ export default function Mb51AgingPageClient() {
 
       setTimeout(() => {
         try {
-          const parsed = parseMb51AgingWorkbook(wb, sheetNames);
+          const parsed = parseMb51Workbook(wb, sheetNames);
           if (!parsed.rows.length) {
-            setLoadMsg(
-              'No usable rows found.' +
-                (parsed.miss.length ? ' Missing columns → ' + parsed.miss.join(' | ') : '')
-            );
+            setLoadMsg(formatMb51ParseFailure(parsed));
             setIsErrMsg(true);
             return;
           }
@@ -876,12 +762,9 @@ export default function Mb51AgingPageClient() {
           const f = files[i];
           setLoadMsg(`Reading ${i + 1}/${files.length}: ${f.name}…`);
           const wb = await readWorkbookFile(f);
-          const parsed = parseMb51AgingWorkbook(wb, wb.SheetNames);
+          const parsed = parseMb51Workbook(wb, wb.SheetNames);
           if (!parsed.rows.length) {
-            errors.push(
-              `${f.name}: no usable rows` +
-                (parsed.miss.length ? ` (${parsed.miss.join(' | ')})` : '')
-            );
+            errors.push(`${f.name}: ${formatMb51ParseFailure(parsed)}`);
             continue;
           }
           applyUomInfo(parsed.rows, wb.SheetNames, parsed.qtyCol, parsed.uomCol, parsed.uomSeen);
@@ -1315,10 +1198,31 @@ export default function Mb51AgingPageClient() {
             >
               <b>Select or drop one or more MB51 exports (.xlsx / .xls / .csv)</b>
               <div className="msg">
-                Required columns: Posting Date, Material, Material Description, Material Group,
-                Qty in unit of entry, Supplier, Supplier Name. Files are merged into the overall
-                dataset and one FIFO snapshot is rebuilt (duplicates skipped).
+                Required: Posting Date, Material, Quantity (or Qty in unit of entry). Optional: Plant,
+                Material Document, Material Description, Material Group, Base Unit of Measure /
+                Unit of Entry, Supplier, Supplier Name, Movement Type, Text. Files merge into the
+                overall dataset; one FIFO snapshot is rebuilt (duplicates skipped).
               </div>
+              <p style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn sec"
+                  disabled={loading}
+                  onClick={() => downloadMb51TemplateCsv('sap')}
+                  title="Plant, Material Document, Posting Date, Material, Quantity, Base Unit of Measure, …"
+                >
+                  Template: SAP Quantity
+                </button>
+                <button
+                  type="button"
+                  className="btn sec"
+                  disabled={loading}
+                  onClick={() => downloadMb51TemplateCsv('qty-entry')}
+                  title="Plant, Material Document, Posting Date, Material, Qty in unit of entry, Unit of Entry, …"
+                >
+                  Template: Qty in unit of entry
+                </button>
+              </p>
               <p>
                 <input
                   type="file"
