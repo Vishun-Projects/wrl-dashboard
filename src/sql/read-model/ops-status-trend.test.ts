@@ -6,6 +6,7 @@ import {
 } from '@/sql/read-model/ops-status-trend';
 import {
   activityFlagsForDay,
+  opsActivityCatchupFrom,
   resolveOpsSnapshotAsOf,
 } from '@/lib/read-model/ops-status-snapshot';
 
@@ -75,6 +76,12 @@ describe('ops-status-trend helpers', () => {
   it('rejects invalid snapshot as-of dates', () => {
     expect(() => resolveOpsSnapshotAsOf('not-a-date')).toThrow(/Invalid/);
     expect(resolveOpsSnapshotAsOf('2026-10-27')).toBe('2026-10-27');
+  });
+
+  it('catch-up reseals last day then fills gap; no-op when current', () => {
+    expect(opsActivityCatchupFrom('2026-11-01', '2026-11-01')).toBeNull();
+    expect(opsActivityCatchupFrom('2026-10-30', '2026-11-01')).toBe('2026-10-30');
+    expect(opsActivityCatchupFrom(null, '2026-11-01', 3)).toBe('2026-10-30');
   });
 
   it('counts solved on solved_at day (Register Solved Date), not later editedon', () => {

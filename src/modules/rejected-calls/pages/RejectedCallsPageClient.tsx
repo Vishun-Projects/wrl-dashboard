@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, XCircle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, XCircle } from 'lucide-react';
 import { TrnLink } from '@/components/calls/TrnLink';
 import { PageShell, PageScrollRegion } from '@/components/layout/PageShell';
 import { AdminTable, AdminTableCard, AdminTd, AdminTh, AdminThead, AdminTr } from '@/components/admin/AdminUi';
@@ -58,6 +58,7 @@ export default function RejectedCallsPageClient() {
   const [rowsData, setRowsData] = useState<RejectedCallsRowsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const stripAtRevision = useRef<number | null>(null);
 
   const ready = Boolean(prefsReady && resourcesLoaded && appliedFilters);
@@ -206,6 +207,31 @@ export default function RejectedCallsPageClient() {
     </div>
   );
 
+  async function exportCsv() {
+    if (!appliedFilters) return;
+    setExporting(true);
+    try {
+      const params = buildParams({ format: 'csv' });
+      const res = await fetch(`${API}?${params}`, { credentials: 'include' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(typeof body.error === 'string' ? body.error : `HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `rejected-calls-${toDateString(appliedFilters.dateRange.end)}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      feedback.actionSuccess('CSV downloaded');
+    } catch (err) {
+      feedback.actionFailed(err instanceof Error ? err.message : 'CSV export failed');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const subtitle = appliedFilters
     ? formatReportScopeSubtitle(
         appliedFilters.dateRange,
@@ -219,6 +245,17 @@ export default function RejectedCallsPageClient() {
       title="Rejected Calls"
       subtitle={subtitle}
       icon={<XCircle className="h-4 w-4" />}
+      actions={
+        <button
+          type="button"
+          onClick={() => void exportCsv()}
+          disabled={exporting || !ready}
+          className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 disabled:opacity-50"
+        >
+          <Download className="h-3 w-3" />
+          {exporting ? 'Exporting…' : 'Download CSV'}
+        </button>
+      }
       toolbar={
         <RegisterPageFilters
           updating={updating}

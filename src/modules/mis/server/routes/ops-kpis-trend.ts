@@ -6,6 +6,7 @@ import { parseCallTypes } from '@/sql/read-model/summary';
 import { queryOpsStatusTrend } from '@/sql/read-model/ops-status-trend';
 import { resolveOpsPeriod } from '@/modules/mis/server/routes/ops-kpis';
 import { yesterdayIst } from '@/lib/dates/local-date';
+import { ensureOpsActivitySealedThrough } from '@/lib/read-model/ops-status-snapshot';
 
 export async function GET(req: NextRequest) {
   try {
@@ -29,6 +30,12 @@ export async function GET(req: NextRequest) {
     // Incomplete today — seal/chart through yesterday IST only.
     const yesterday = yesterdayIst();
     const endDate = range.endDate > yesterday ? yesterday : range.endDate;
+    if (endDate >= range.startDate) {
+      // Midnight seal can lag; catch up from hot so "This month" isn't empty.
+      await ensureOpsActivitySealedThrough(endDate).catch((err) => {
+        console.warn('[ops-kpis/trend] seal catch-up failed', err);
+      });
+    }
     const trend =
       endDate < range.startDate
         ? { days: [], callTypes: [], topTypes: [] }

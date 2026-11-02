@@ -25,6 +25,55 @@ function assertDate(label: string, raw: string): string {
   return v;
 }
 
+/** UTC calendar arithmetic on YYYY-MM-DD (IST day labels are timezone-free strings). */
+export function addCalendarDays(ymd: string, delta: number): string {
+  const [y, m, d] = assertDate('date', ymd).split('-').map(Number);
+  const dt = new Date(Date.UTC(y!, m! - 1, d!));
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * Inclusive catch-up start when seals lag behind `endDate`.
+ * Re-seals the last sealed day (fixes thin/bad EOD rows) then fills the gap.
+ * Caps request-path rebuilds (midnight should keep this at 0–1d).
+ */
+export function opsActivityCatchupFrom(
+  maxSealed: string | null,
+  endDate: string,
+  capDays = 62
+): string | null {
+  const to = assertDate('to', endDate);
+  if (maxSealed === to) return null;
+  const earliest = addCalendarDays(to, -(Math.max(1, capDays) - 1));
+  let from = maxSealed && DATE_RE.test(maxSealed) ? maxSealed : earliest;
+  if (from < earliest) from = earliest;
+  if (from > to) return null;
+  return from;
+}
+
+/**
+ * Fill missing daily activity seals through `endDate` from hot.
+ * No-op when already sealed through endDate.
+ */
+export async function ensureOpsActivitySealedThrough(
+  endDate: string
+): Promise<{ fromDate: string | null; toDate: string; rows: number }> {
+  const to = assertDate('to', endDate);
+  const maxRes = await withClient((c) =>
+    c.query<{ d: string | null }>(
+      `SELECT MAX(as_of_date)::text AS d
+       FROM ops_status_snapshot_daily
+       WHERE as_of_date <= $1::date`,
+      [to]
+    )
+  );
+  const from = opsActivityCatchupFrom(maxRes.rows[0]?.d ?? null, to);
+  if (!from) return { fromDate: null, toDate: to, rows: 0 };
+  const result = await backfillOpsStatusActivity(from, to);
+  return { fromDate: result.fromDate, toDate: result.toDate, rows: result.rows };
+}
+
 export type ActivityHotLite = {
   logged_at: Date | string | null;
   solved_at: Date | string | null;

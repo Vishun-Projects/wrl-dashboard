@@ -163,6 +163,24 @@ export async function fetchRejectedCallsRows(
   return { rows, total, page: filters.page, pageSize: filters.pageSize };
 }
 
+/** One CRM page up to REJECTED_CALLS_CSV_CAP for download. */
+export async function fetchRejectedCallsForCsv(
+  filters: RejectedCallsFilters,
+  cap: number
+): Promise<RejectedCallRow[]> {
+  const limit = Math.max(1, Math.min(cap, 20_000));
+  const listRes = await postQuery({
+    rawSql: buildRejectedCallsListSql({
+      ...toSqlOpts({ ...filters, page: 1, pageSize: limit }),
+      offset: 0,
+      limit,
+    }),
+    timeoutMs: CRM_TIMEOUT_MS,
+  });
+  const raw = (listRes.data ?? []) as Record<string, unknown>[];
+  return raw.map(mapRow).filter((r): r is RejectedCallRow => r != null);
+}
+
 export async function fetchRejectedCallsSummary(
   filters: RejectedCallsFilters
 ): Promise<RejectedCallsSummary> {
