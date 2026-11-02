@@ -13,6 +13,7 @@ import { saveMb51AgingRows } from '@/modules/mb51-aging/save-client';
 import {
   downloadMb51TemplateCsv,
   formatMb51ParseFailure,
+  listLoadedSheetNames,
   parseMb51Workbook,
 } from '@/modules/mb51-aging/parse-workbook';
 
@@ -595,7 +596,8 @@ export default function Mb51TablePageClient() {
           setWorkbookFileName(file.name);
           setLoadMsg(`Reading ${i + 1}/${files.length}: ${file.name}…`);
           const workbook = await readWorkbookFile(file);
-          const parsed = parseMb51Workbook(workbook, workbook.SheetNames);
+          // Any readable sheet — do not care what the tab is named.
+          const parsed = parseMb51Workbook(workbook);
           if (!parsed.rows.length) {
             errors.push(`${file.name}: ${formatMb51ParseFailure(parsed)}`);
             continue;
@@ -646,10 +648,11 @@ export default function Mb51TablePageClient() {
     void readWorkbookFile(file)
       .then((workbook) => {
         setWbInstance(workbook);
-        if (workbook.SheetNames.length === 1) {
-          processSheets(workbook, workbook.SheetNames, file.name);
-        } else if (workbook.SheetNames.length > 1) {
-          const list: SheetOption[] = workbook.SheetNames.map((sheetName) => {
+        const names = listLoadedSheetNames(workbook);
+        if (names.length === 1) {
+          processSheets(workbook, names, file.name);
+        } else if (names.length > 1) {
+          const list: SheetOption[] = names.map((sheetName) => {
             const worksheet = workbook.Sheets[sheetName];
             const range = worksheet?.['!ref'] ? XLSX.utils.decode_range(worksheet['!ref']) : null;
             return { name: sheetName, rowCount: range ? Math.max(0, range.e.r) : 0 };
@@ -662,7 +665,7 @@ export default function Mb51TablePageClient() {
           setSelectedSheets(defaultSelection);
           setLoadMsg(`Workbook contains ${list.length} sheets. Choose which ones to load:`);
         } else {
-          setLoadMsg('The selected workbook contains no sheets.');
+          setLoadMsg('The selected workbook has no readable worksheets.');
           setIsErrMsg(true);
         }
       })

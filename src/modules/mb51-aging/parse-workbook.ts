@@ -137,61 +137,45 @@ export function listLoadedSheetNames(wb: XLSX.WorkBook): string[] {
 }
 
 /**
- * Map requested names onto sheets that exist. SAP/Excel sometimes lists a tab
- * (e.g. "MB51") that isn't in `wb.Sheets` after read — fall back to loaded sheets.
+ * Pick sheets to parse. Sheet *names* are irrelevant — any tab with MB51 columns works.
+ * Ghost names in SheetNames that SheetJS didn't load are ignored (no error).
+ * If the user picked specific tabs, only those that actually loaded are used;
+ * if none of the picks loaded, fall back to every readable sheet.
  */
 export function resolveMb51SheetNames(
   wb: XLSX.WorkBook,
-  requested: string[]
+  requested?: string[] | null
 ): { sheets: string[]; notes: string[] } {
   const available = listLoadedSheetNames(wb);
-  const notes: string[] = [];
   if (!available.length) {
     return {
       sheets: [],
-      notes: [
-        `No readable sheets in workbook (SheetNames=${JSON.stringify(wb.SheetNames ?? [])}).`,
-      ],
+      notes: ['Workbook has no readable worksheets.'],
     };
   }
 
-  const byNorm = new Map(
-    available.map((n) => [normHeader(n), n] as const)
-  );
+  const picks = (requested ?? []).map((n) => n.trim()).filter(Boolean);
+  if (!picks.length) return { sheets: available, notes: [] };
 
+  const byNorm = new Map(available.map((n) => [normHeader(n), n] as const));
   const resolved: string[] = [];
-  const missing: string[] = [];
-  for (const raw of requested.length ? requested : available) {
+  for (const raw of picks) {
     if (wb.Sheets?.[raw] != null) {
       if (!resolved.includes(raw)) resolved.push(raw);
       continue;
     }
     const fuzzy = byNorm.get(normHeader(raw));
-    if (fuzzy) {
-      if (!resolved.includes(fuzzy)) resolved.push(fuzzy);
-      if (fuzzy !== raw) notes.push(`Sheet "${raw}" matched as "${fuzzy}".`);
-      continue;
-    }
-    missing.push(raw);
+    if (fuzzy && !resolved.includes(fuzzy)) resolved.push(fuzzy);
   }
 
-  if (missing.length) {
-    notes.push(
-      `Sheet${missing.length === 1 ? '' : 's'} ${missing.map((n) => `"${n}"`).join(', ')} ` +
-        `not found (available: ${available.map((n) => `"${n}"`).join(', ')}).`
-    );
-  }
-
-  if (!resolved.length) {
-    notes.push(`Using all readable sheets: ${available.map((n) => `"${n}"`).join(', ')}.`);
-    return { sheets: available, notes };
-  }
-  return { sheets: resolved, notes };
+  // User picked tabs that aren't loadable → just use whatever SheetJS gave us.
+  if (!resolved.length) return { sheets: available, notes: [] };
+  return { sheets: resolved, notes: [] };
 }
 
 export function parseMb51Workbook(
   wb: XLSX.WorkBook,
-  sheetNames: string[]
+  sheetNames?: string[] | null
 ): Mb51ParseResult {
   const out: Mb51AgingMovement[] = [];
   const reasons: string[] = [];
@@ -210,7 +194,7 @@ export function parseMb51Workbook(
       rows: [],
       reasons: reasons.length
         ? reasons
-        : ['Workbook has no readable sheets.'],
+        : ['Workbook has no readable worksheets.'],
       qtyCol,
       uomCol,
       uomSeen,
@@ -222,10 +206,7 @@ export function parseMb51Workbook(
 
   for (const sn of resolvedNames) {
     const ws = wb.Sheets[sn];
-    if (!ws) {
-      reasons.push(`Sheet "${sn}": not found in workbook.`);
-      continue;
-    }
+    if (!ws) continue;
     const data: unknown[][] = XLSX.utils.sheet_to_json(ws, {
       header: 1,
       raw: true,

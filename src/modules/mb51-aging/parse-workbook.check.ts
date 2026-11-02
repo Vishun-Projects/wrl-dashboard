@@ -70,7 +70,7 @@ const parsedTitle = parseMb51Workbook(titled, ['Data']);
 assert.equal(parsedTitle.rows.length, 1);
 assert.equal(parsedTitle.rows[0].q, 3);
 
-// Ghost sheet name (listed but missing) → fall back to real sheets
+// Ghost sheet name (listed but missing) → ignore name, use real sheets; no error noise
 const ghost = XLSX.utils.book_new();
 XLSX.utils.book_append_sheet(
   ghost,
@@ -83,9 +83,13 @@ XLSX.utils.book_append_sheet(
 ghost.SheetNames = ['MB51', 'Sheet1'];
 const resolved = resolveMb51SheetNames(ghost, ['MB51']);
 assert.deepEqual(resolved.sheets, ['Sheet1']);
-assert.match(resolved.notes.join(' '), /MB51/);
-const parsedGhost = parseMb51Workbook(ghost, ['MB51']);
+assert.equal(resolved.notes.length, 0);
+const parsedGhost = parseMb51Workbook(ghost); // no sheet filter — any tab
 assert.equal(parsedGhost.rows.length, 1);
 assert.equal(parsedGhost.rows[0].m, 'M9');
+assert.ok(
+  !parsedGhost.reasons.some((r) => /Sheet "MB51"/i.test(r)),
+  'must not complain about ghost sheet names'
+);
 
 console.log('mb51-aging parse-workbook check: ok');

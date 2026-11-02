@@ -23,6 +23,7 @@ import { saveMb51AgingRows } from '@/modules/mb51-aging/save-client';
 import {
   downloadMb51TemplateCsv,
   formatMb51ParseFailure,
+  listLoadedSheetNames,
   parseMb51Workbook,
 } from '@/modules/mb51-aging/parse-workbook';
 import {
@@ -764,12 +765,19 @@ export default function Mb51AgingPageClient() {
           const f = files[i];
           setLoadMsg(`Reading ${i + 1}/${files.length}: ${f.name}…`);
           const wb = await readWorkbookFile(f);
-          const parsed = parseMb51Workbook(wb, wb.SheetNames);
+          // Any readable sheet — do not care what the tab is named.
+          const parsed = parseMb51Workbook(wb);
           if (!parsed.rows.length) {
             errors.push(`${f.name}: ${formatMb51ParseFailure(parsed)}`);
             continue;
           }
-          applyUomInfo(parsed.rows, wb.SheetNames, parsed.qtyCol, parsed.uomCol, parsed.uomSeen);
+          applyUomInfo(
+            parsed.rows,
+            listLoadedSheetNames(wb),
+            parsed.qtyCol,
+            parsed.uomCol,
+            parsed.uomSeen
+          );
           setLoadMsg(
             `Saving ${i + 1}/${files.length}: ${f.name} (${parsed.rows.length.toLocaleString('en-IN')} rows)…`
           );
@@ -813,7 +821,7 @@ export default function Mb51AgingPageClient() {
     void readWorkbookFile(f)
       .then((wb) => {
         setWbInstance(wb);
-        const names = wb.SheetNames;
+        const names = listLoadedSheetNames(wb);
         if (names.length > 1) {
           const list = names.map((n) => {
             const ws = wb.Sheets[n] as unknown as { '!data'?: unknown[] } | unknown[];
