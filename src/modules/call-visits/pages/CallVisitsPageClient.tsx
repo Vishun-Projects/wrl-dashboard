@@ -313,30 +313,79 @@ function ColumnPicker({
   );
 }
 
+type SapMode = '' | 'has' | 'blank';
+
+type FilterState = {
+  range: ReportDateRange;
+  search: string;
+  plant: string;
+  branch: string;
+  client: string;
+  customer: string;
+  engineer: string;
+  status: string;
+  part: string;
+  category: string;
+  sapCons: string;
+  sapConsMode: SapMode;
+  sapDef: string;
+  sapDefMode: SapMode;
+  sapRec: string;
+  sapRecMode: SapMode;
+  barcodeMismatch: boolean;
+};
+
+function emptyFilters(): FilterState {
+  return {
+    range: defaultDateRange(),
+    search: '',
+    plant: '',
+    branch: '',
+    client: '',
+    customer: '',
+    engineer: '',
+    status: '',
+    part: '',
+    category: '',
+    sapCons: '',
+    sapConsMode: '',
+    sapDef: '',
+    sapDefMode: '',
+    sapRec: '',
+    sapRecMode: '',
+    barcodeMismatch: false,
+  };
+}
+
+function sapFilterValue(mode: SapMode, text: string): string {
+  if (mode === 'blank') return '__blank__';
+  if (text.trim()) return text.trim();
+  if (mode === 'has') return '__has__';
+  return '';
+}
+
+function toFilterArgs(f: FilterState) {
+  return {
+    range: f.range,
+    search: f.search,
+    plant: f.plant,
+    branch: f.branch,
+    client: f.client,
+    customer: f.customer,
+    engineer: f.engineer,
+    status: f.status,
+    part: f.part,
+    category: f.category,
+    sapDoc: sapFilterValue(f.sapConsMode, f.sapCons),
+    sapDocDefective: sapFilterValue(f.sapDefMode, f.sapDef),
+    sapDocReceipt: sapFilterValue(f.sapRecMode, f.sapRec),
+    barcodeMismatch: f.barcodeMismatch,
+  };
+}
+
 export default function CallVisitsPageClient() {
-  const [range, setRange] = useState<ReportDateRange>(() => defaultDateRange());
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
-  const [partInput, setPartInput] = useState('');
-  const [part, setPart] = useState('');
-  const [sapConsInput, setSapConsInput] = useState('');
-  const [sapCons, setSapCons] = useState('');
-  const [sapConsMode, setSapConsMode] = useState<'' | 'has' | 'blank'>('');
-  const [sapDefInput, setSapDefInput] = useState('');
-  const [sapDef, setSapDef] = useState('');
-  const [sapDefMode, setSapDefMode] = useState<'' | 'has' | 'blank'>('');
-  const [sapRecInput, setSapRecInput] = useState('');
-  const [sapRec, setSapRec] = useState('');
-  const [sapRecMode, setSapRecMode] = useState<'' | 'has' | 'blank'>('');
-  const [customerInput, setCustomerInput] = useState('');
-  const [customer, setCustomer] = useState('');
-  const [plant, setPlant] = useState('');
-  const [branch, setBranch] = useState('');
-  const [client, setClient] = useState('');
-  const [engineer, setEngineer] = useState('');
-  const [status, setStatus] = useState('');
-  const [category, setCategory] = useState('');
-  const [barcodeMismatch, setBarcodeMismatch] = useState(false);
+  const [draft, setDraft] = useState<FilterState>(emptyFilters);
+  const [applied, setApplied] = useState<FilterState>(emptyFilters);
   /** Rectangular cell select (browser table select always grabs whole rows). */
   type CellSel = { colLo: number; colHi: number; rowLo: number; rowHi: number };
   const colDragRef = useRef<{
@@ -365,26 +414,6 @@ export default function CallVisitsPageClient() {
   const [importingMm, setImportingMm] = useState(false);
   const mmFileRef = useRef<HTMLInputElement>(null);
   const { sort, onSort } = useTableSort<SortKey>(null);
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setPage(1);
-      setSearch(searchInput);
-      setPart(partInput);
-      setCustomer(customerInput);
-      setSapCons(sapConsInput);
-      setSapDef(sapDefInput);
-      setSapRec(sapRecInput);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [searchInput, partInput, customerInput, sapConsInput, sapDefInput, sapRecInput]);
-
-  function sapFilterValue(mode: '' | 'has' | 'blank', text: string): string {
-    if (mode === 'blank') return '__blank__';
-    if (text.trim()) return text.trim();
-    if (mode === 'has') return '__has__';
-    return '';
-  }
 
   const plantOptions = useMemo<FilterSelectOption[]>(
     () => options.plants.map((b) => ({ value: b, label: b })),
@@ -427,26 +456,22 @@ export default function CallVisitsPageClient() {
     });
   };
 
-  const filterArgs = {
-    range,
-    search,
-    plant,
-    branch,
-    client,
-    customer,
-    engineer,
-    status,
-    part,
-    category,
-    sapDoc: sapFilterValue(sapConsMode, sapCons),
-    sapDocDefective: sapFilterValue(sapDefMode, sapDef),
-    sapDocReceipt: sapFilterValue(sapRecMode, sapRec),
-    barcodeMismatch,
-  };
+  function applyFilters() {
+    setPage(1);
+    setApplied({
+      ...draft,
+      search: draft.search.trim(),
+      customer: draft.customer.trim(),
+      part: draft.part.trim(),
+      sapCons: draft.sapCons.trim(),
+      sapDef: draft.sapDef.trim(),
+      sapRec: draft.sapRec.trim(),
+    });
+  }
 
   const loadOptions = useCallback(async () => {
     const params = buildParams({
-      range,
+      range: applied.range,
       search: '',
       plant: '',
       branch: '',
@@ -474,13 +499,13 @@ export default function CallVisitsPageClient() {
       statuses: list('statuses'),
       categories: list('categories'),
     });
-  }, [range]);
+  }, [applied.range]);
 
   const loadRows = useCallback(
     async (signal: AbortSignal) => {
       setLoading(true);
       try {
-        const params = buildParams({ ...filterArgs, sort, page, pageSize });
+        const params = buildParams({ ...toFilterArgs(applied), sort, page, pageSize });
         const res = await fetch(`${API}?${params.toString()}`, { credentials: 'include', signal });
         const body = await readJson(res);
         if (!res.ok) throw new Error(String(body.error ?? 'Failed to load parts'));
@@ -492,28 +517,7 @@ export default function CallVisitsPageClient() {
         if (!signal.aborted) setLoading(false);
       }
     },
-    [
-      range,
-      search,
-      plant,
-      branch,
-      client,
-      customer,
-      engineer,
-      status,
-      part,
-      category,
-      sapCons,
-      sapConsMode,
-      sapDef,
-      sapDefMode,
-      sapRec,
-      sapRecMode,
-      barcodeMismatch,
-      sort,
-      page,
-      pageSize,
-    ]
+    [applied, sort, page, pageSize]
   );
 
   useEffect(() => {
@@ -529,7 +533,7 @@ export default function CallVisitsPageClient() {
   async function exportCsv() {
     setExporting(true);
     try {
-      const params = buildParams({ ...filterArgs, sort: null });
+      const params = buildParams({ ...toFilterArgs(applied), sort: null });
       params.set('format', 'csv');
       const res = await fetch(`${API}?${params.toString()}`, { credentials: 'include' });
       if (!res.ok) {
@@ -690,14 +694,19 @@ export default function CallVisitsPageClient() {
       icon={<Package className="h-4 w-4" />}
       toolbar={
         <div className="register-filter-bar register-filter-row-compact shrink-0 !px-2 !py-1">
-          <div className="flex flex-wrap items-center gap-1.5 overflow-visible [&_.filter-select-root]:!min-w-[7.5rem] [&_.filter-select-root]:!max-w-[11rem] [&_.filter-select-root]:!shrink-0 [&_.filter-select-root]:!flex-[0_0_9rem] [&_.register-filter-btn]:!h-6 [&_.register-filter-btn]:!px-1.5 [&_.register-filter-btn]:!text-[10px] [&_.register-filter-btn]:!shadow-none">
+          <div
+            className="flex flex-wrap items-center gap-1.5 overflow-visible [&_.filter-select-root]:!min-w-[7.5rem] [&_.filter-select-root]:!max-w-[11rem] [&_.filter-select-root]:!shrink-0 [&_.filter-select-root]:!flex-[0_0_9rem] [&_.register-filter-btn]:!h-6 [&_.register-filter-btn]:!px-1.5 [&_.register-filter-btn]:!text-[10px] [&_.register-filter-btn]:!shadow-none"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') {
+                e.preventDefault();
+                applyFilters();
+              }
+            }}
+          >
             <input
               type="search"
-              value={searchInput}
-              onChange={(e) => {
-                setPage(1);
-                setSearchInput(e.target.value);
-              }}
+              value={draft.search}
+              onChange={(e) => setDraft((d) => ({ ...d, search: e.target.value }))}
               placeholder="Call no, part, or barcode…"
               aria-label="Search"
               className="h-6 w-44 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-800 placeholder:text-slate-400"
@@ -706,12 +715,9 @@ export default function CallVisitsPageClient() {
               label="Branch"
               emptyLabel="All branches"
               options={plantOptions}
-              selected={plant ? [plant] : []}
+              selected={draft.plant ? [draft.plant] : []}
               mode="single"
-              onChange={(values) => {
-                setPage(1);
-                setPlant(pickSingle(values));
-              }}
+              onChange={(values) => setDraft((d) => ({ ...d, plant: pickSingle(values) }))}
               searchPlaceholder="Search branch…"
               panelClassName="w-72"
               layout="inline"
@@ -720,12 +726,9 @@ export default function CallVisitsPageClient() {
               label="Franchisee"
               emptyLabel="All franchisees"
               options={branchOptions}
-              selected={branch ? [branch] : []}
+              selected={draft.branch ? [draft.branch] : []}
               mode="single"
-              onChange={(values) => {
-                setPage(1);
-                setBranch(pickSingle(values));
-              }}
+              onChange={(values) => setDraft((d) => ({ ...d, branch: pickSingle(values) }))}
               searchPlaceholder="Search franchisee…"
               panelClassName="w-72"
               layout="inline"
@@ -734,23 +737,17 @@ export default function CallVisitsPageClient() {
               label="Client"
               emptyLabel="All clients"
               options={clientOptions}
-              selected={client ? [client] : []}
+              selected={draft.client ? [draft.client] : []}
               mode="single"
-              onChange={(values) => {
-                setPage(1);
-                setClient(pickSingle(values));
-              }}
+              onChange={(values) => setDraft((d) => ({ ...d, client: pickSingle(values) }))}
               searchPlaceholder="Search client…"
               panelClassName="w-56"
               layout="inline"
             />
             <input
               type="search"
-              value={customerInput}
-              onChange={(e) => {
-                setPage(1);
-                setCustomerInput(e.target.value);
-              }}
+              value={draft.customer}
+              onChange={(e) => setDraft((d) => ({ ...d, customer: e.target.value }))}
               placeholder="Customer contains…"
               aria-label="Customer contains"
               className="h-6 w-36 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-800 placeholder:text-slate-400"
@@ -759,12 +756,9 @@ export default function CallVisitsPageClient() {
               label="Engineer"
               emptyLabel="All engineers"
               options={engineerOptions}
-              selected={engineer ? [engineer] : []}
+              selected={draft.engineer ? [draft.engineer] : []}
               mode="single"
-              onChange={(values) => {
-                setPage(1);
-                setEngineer(pickSingle(values));
-              }}
+              onChange={(values) => setDraft((d) => ({ ...d, engineer: pickSingle(values) }))}
               searchPlaceholder="Search engineer…"
               panelClassName="w-64"
               layout="inline"
@@ -773,23 +767,17 @@ export default function CallVisitsPageClient() {
               label="Status"
               emptyLabel="All statuses"
               options={statusOptions}
-              selected={status ? [status] : []}
+              selected={draft.status ? [draft.status] : []}
               mode="single"
-              onChange={(values) => {
-                setPage(1);
-                setStatus(pickSingle(values));
-              }}
+              onChange={(values) => setDraft((d) => ({ ...d, status: pickSingle(values) }))}
               searchPlaceholder="Search status…"
               panelClassName="w-56"
               layout="inline"
             />
             <input
               type="search"
-              value={partInput}
-              onChange={(e) => {
-                setPage(1);
-                setPartInput(e.target.value);
-              }}
+              value={draft.part}
+              onChange={(e) => setDraft((d) => ({ ...d, part: e.target.value }))}
               placeholder="Part contains…"
               aria-label="Part contains"
               className="h-6 w-32 shrink-0 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-800 placeholder:text-slate-400"
@@ -801,28 +789,31 @@ export default function CallVisitsPageClient() {
                 { value: 'has', label: 'Has a value' },
                 { value: 'blank', label: 'Is blank' },
               ]}
-              selected={sapConsMode ? [sapConsMode] : []}
+              selected={draft.sapConsMode ? [draft.sapConsMode] : []}
               mode="single"
               searchable={false}
               onChange={(values) => {
-                setPage(1);
                 const next = pickSingle(values);
-                setSapConsMode(next === 'blank' || next === 'has' ? next : '');
-                setSapConsInput('');
-                setSapCons('');
+                setDraft((d) => ({
+                  ...d,
+                  sapConsMode: next === 'blank' || next === 'has' ? next : '',
+                  sapCons: '',
+                }));
               }}
               panelClassName="w-56"
               layout="inline"
             />
-            {sapConsMode !== 'blank' ? (
+            {draft.sapConsMode !== 'blank' ? (
               <input
                 type="search"
-                value={sapConsInput}
-                onChange={(e) => {
-                  setPage(1);
-                  setSapConsInput(e.target.value);
-                  if (sapConsMode) setSapConsMode('');
-                }}
+                value={draft.sapCons}
+                onChange={(e) =>
+                  setDraft((d) => ({
+                    ...d,
+                    sapCons: e.target.value,
+                    sapConsMode: d.sapConsMode ? '' : d.sapConsMode,
+                  }))
+                }
                 placeholder="SAP doc contains…"
                 aria-label="SAP doc contains"
                 className="h-6 w-36 shrink-0 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-800 placeholder:text-slate-400"
@@ -835,28 +826,31 @@ export default function CallVisitsPageClient() {
                 { value: 'has', label: 'Has a value' },
                 { value: 'blank', label: 'Is blank' },
               ]}
-              selected={sapDefMode ? [sapDefMode] : []}
+              selected={draft.sapDefMode ? [draft.sapDefMode] : []}
               mode="single"
               searchable={false}
               onChange={(values) => {
-                setPage(1);
                 const next = pickSingle(values);
-                setSapDefMode(next === 'blank' || next === 'has' ? next : '');
-                setSapDefInput('');
-                setSapDef('');
+                setDraft((d) => ({
+                  ...d,
+                  sapDefMode: next === 'blank' || next === 'has' ? next : '',
+                  sapDef: '',
+                }));
               }}
               panelClassName="w-56"
               layout="inline"
             />
-            {sapDefMode !== 'blank' ? (
+            {draft.sapDefMode !== 'blank' ? (
               <input
                 type="search"
-                value={sapDefInput}
-                onChange={(e) => {
-                  setPage(1);
-                  setSapDefInput(e.target.value);
-                  if (sapDefMode) setSapDefMode('');
-                }}
+                value={draft.sapDef}
+                onChange={(e) =>
+                  setDraft((d) => ({
+                    ...d,
+                    sapDef: e.target.value,
+                    sapDefMode: d.sapDefMode ? '' : d.sapDefMode,
+                  }))
+                }
                 placeholder="Defective doc contains…"
                 aria-label="Defective SAP doc contains"
                 className="h-6 w-36 shrink-0 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-800 placeholder:text-slate-400"
@@ -869,28 +863,31 @@ export default function CallVisitsPageClient() {
                 { value: 'has', label: 'Has a value' },
                 { value: 'blank', label: 'Is blank' },
               ]}
-              selected={sapRecMode ? [sapRecMode] : []}
+              selected={draft.sapRecMode ? [draft.sapRecMode] : []}
               mode="single"
               searchable={false}
               onChange={(values) => {
-                setPage(1);
                 const next = pickSingle(values);
-                setSapRecMode(next === 'blank' || next === 'has' ? next : '');
-                setSapRecInput('');
-                setSapRec('');
+                setDraft((d) => ({
+                  ...d,
+                  sapRecMode: next === 'blank' || next === 'has' ? next : '',
+                  sapRec: '',
+                }));
               }}
               panelClassName="w-56"
               layout="inline"
             />
-            {sapRecMode !== 'blank' ? (
+            {draft.sapRecMode !== 'blank' ? (
               <input
                 type="search"
-                value={sapRecInput}
-                onChange={(e) => {
-                  setPage(1);
-                  setSapRecInput(e.target.value);
-                  if (sapRecMode) setSapRecMode('');
-                }}
+                value={draft.sapRec}
+                onChange={(e) =>
+                  setDraft((d) => ({
+                    ...d,
+                    sapRec: e.target.value,
+                    sapRecMode: d.sapRecMode ? '' : d.sapRecMode,
+                  }))
+                }
                 placeholder="Receipt doc contains…"
                 aria-label="Defective Receipt SAP doc contains"
                 className="h-6 w-36 shrink-0 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] text-slate-800 placeholder:text-slate-400"
@@ -898,13 +895,10 @@ export default function CallVisitsPageClient() {
             ) : null}
             <button
               type="button"
-              aria-pressed={barcodeMismatch}
-              onClick={() => {
-                setPage(1);
-                setBarcodeMismatch((v) => !v);
-              }}
+              aria-pressed={draft.barcodeMismatch}
+              onClick={() => setDraft((d) => ({ ...d, barcodeMismatch: !d.barcodeMismatch }))}
               className={`h-6 shrink-0 rounded-md border px-1.5 text-[10px] font-medium ${
-                barcodeMismatch
+                draft.barcodeMismatch
                   ? 'border-rose-300 bg-rose-50 text-rose-800'
                   : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
               }`}
@@ -915,32 +909,34 @@ export default function CallVisitsPageClient() {
               label="Part category"
               emptyLabel="All part categories"
               options={categoryOptions}
-              selected={category ? [category] : []}
+              selected={draft.category ? [draft.category] : []}
               mode="single"
-              onChange={(values) => {
-                setPage(1);
-                setCategory(pickSingle(values));
-              }}
+              onChange={(values) => setDraft((d) => ({ ...d, category: pickSingle(values) }))}
               searchPlaceholder="Search category…"
               panelClassName="w-64"
               layout="inline"
             />
             <div className="min-w-[7.5rem] max-w-[10rem] shrink-0 [&_button]:!h-6 [&_button]:!px-1.5 [&_button]:!text-[10px] [&_button]:!shadow-none">
               <DateRangeSelector
-                value={range.label}
-                startDate={range.start}
-                endDate={range.end}
+                value={draft.range.label}
+                startDate={draft.range.start}
+                endDate={draft.range.end}
                 includeAllTime
-                onChange={(next) => {
-                  setPage(1);
-                  setRange(next);
-                }}
+                onChange={(next) => setDraft((d) => ({ ...d, range: next }))}
               />
             </div>
+            <button
+              type="button"
+              className="inline-flex h-6 shrink-0 items-center rounded-md bg-slate-900 px-2.5 text-[10px] font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+              onClick={applyFilters}
+              disabled={loading}
+            >
+              Apply filters
+            </button>
             <span className="ml-auto text-[10px] text-slate-500">
               {loading
                 ? 'Loading…'
-                : `${total.toLocaleString()}${barcodeMismatch ? ' mismatched' : ''} parts`}
+                : `${total.toLocaleString()}${applied.barcodeMismatch ? ' mismatched' : ''} parts`}
             </span>
           </div>
         </div>

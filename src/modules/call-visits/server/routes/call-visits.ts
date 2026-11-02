@@ -3,6 +3,7 @@ import { resolveRequestReportSecurity } from '@/lib/auth/resolve-bearer-security
 import { toUserFacingError } from '@/lib/utils/user-facing-errors';
 import { buildCallPartsCsvStream } from '@/modules/call-visits/server/csv-export';
 import {
+  ensureCallPartsReady,
   fetchCallPartsOptions,
   fetchCallPartsRows,
   parseCallPartsFilters,
@@ -12,6 +13,8 @@ export async function GET(req: NextRequest) {
   try {
     const auth = await resolveRequestReportSecurity(req, { pageId: 'call_visits' });
     if (!auth.ok) return auth.response;
+
+    await ensureCallPartsReady();
 
     const { searchParams } = new URL(req.url);
     const filters = {

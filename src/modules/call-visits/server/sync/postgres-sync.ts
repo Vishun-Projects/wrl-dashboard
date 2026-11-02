@@ -107,6 +107,19 @@ export async function ensureCallPartsTable(client: Pg): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_call_parts_part_name
       ON call_parts (upper(btrim(part_name)))
       WHERE coalesce(btrim(part_name), '') <> '';
+    -- Report filters: office scope (nofficeid OR office_under), part code, visit date sort.
+    CREATE INDEX IF NOT EXISTS idx_call_parts_office_under
+      ON call_parts (office_under)
+      WHERE coalesce(btrim(office_under), '') <> '';
+    CREATE INDEX IF NOT EXISTS idx_call_parts_part_code
+      ON call_parts (upper(btrim(part_code)))
+      WHERE coalesce(btrim(part_code), '') <> '';
+    CREATE INDEX IF NOT EXISTS idx_call_parts_visit_at
+      ON call_parts (visit_at DESC NULLS LAST)
+      WHERE visit_at IS NOT NULL;
+    -- Lateral join path: call_no → part rows ordered by name (list/count default ORDER BY).
+    CREATE INDEX IF NOT EXISTS idx_call_parts_call_no_part
+      ON call_parts (call_no, part_name, ncode);
 
     DO $$ BEGIN
       IF NOT EXISTS (

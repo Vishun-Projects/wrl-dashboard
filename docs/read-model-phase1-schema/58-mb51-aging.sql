@@ -59,6 +59,11 @@ CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_vendor
 CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_date
   ON mb51_aging_rows (posting_date);
 
+-- Parts Consumption SAP doc CTE / sap-doc lookup (filter by import + movement + material, skip blank item_text).
+CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_sap_call_docs
+  ON mb51_aging_rows (import_id, movement_type, material)
+  WHERE btrim(item_text) <> '';
+
 COMMENT ON TABLE mb51_aging_rows IS
   'MB51 movement records for FIFO aging calculation.';
 

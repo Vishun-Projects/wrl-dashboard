@@ -28,12 +28,24 @@ import {
   type SapDocLookup,
   type SapDocPair,
 } from '@/modules/call-visits/server/sap-doc';
-import { CALL_PARTS_ENTITY } from '@/modules/call-visits/server/sync/postgres-sync';
+import {
+  CALL_PARTS_ENTITY,
+  ensureCallPartsTable,
+} from '@/modules/call-visits/server/sync/postgres-sync';
 import type { CallPartRow, CallPartsOptions, CallPartsRowsResponse } from '@/modules/call-visits/types';
 
 const SCAN_FETCH = 5_000;
 /** ponytail: enriched scan (JS sort / mismatch) reused across pages for ~60s. */
 const SCAN_TTL_MS = 60_000;
+
+/** CREATE INDEX IF NOT EXISTS once per process so new report indexes land without waiting for sync. */
+let ensureReady: Promise<void> | null = null;
+export function ensureCallPartsReady(): Promise<void> {
+  if (!ensureReady) {
+    ensureReady = withAppClient((client) => ensureCallPartsTable(client)).then(() => undefined);
+  }
+  return ensureReady;
+}
 
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
 
