@@ -84,15 +84,20 @@ type SaveResponse = {
 };
 
 export type SaveMb51Opts = {
-  /** Append into this import instead of creating a new one. */
+  /** Append into this import (overall dataset). Ignored when forceNewImport is true. */
   appendToImportId?: string | null;
+  /**
+   * Rare escape hatch. Default grows the single overall import so FIFO is one snapshot.
+   * true → create a separate import (not what the aging report wants).
+   */
+  forceNewImport?: boolean;
   onProgress?: (saved: number, total: number) => void;
 };
 
 /**
  * Persist parsed MB51 rows in batches.
- * Default: create a **new** import (prior imports stay). Never deletes.
- * Pass appendToImportId to add rows onto an existing import (Part2 onto Part1).
+ * Default: append into the existing overall import (one dataset → one FIFO snapshot).
+ * Never wipes prior rows unless the server is called with replaceExisting.
  */
 export async function saveMb51AgingRows(
   fileName: string,
@@ -113,14 +118,18 @@ export async function saveMb51AgingRows(
 
   let priorCount = 0;
   let priorId: string | null = null;
-  if (opts.appendToImportId) {
-    const { imports } = await fetchMb51Meta(opts.appendToImportId);
+  if (!opts.forceNewImport) {
+    const preferred = opts.appendToImportId?.trim() || null;
+    const { imports, latestImport } = await fetchMb51Meta(preferred);
     const target =
-      imports.find((i) => i.id === opts.appendToImportId) ??
-      (await fetchMb51Meta(opts.appendToImportId)).latestImport;
-    if (!target) throw new Error('Append target import not found');
-    priorId = target.id;
-    priorCount = target.rowCount;
+      (preferred && imports.find((i) => i.id === preferred)) ||
+      latestImport ||
+      imports[0] ||
+      null;
+    if (target) {
+      priorId = target.id;
+      priorCount = target.rowCount;
+    }
   }
 
   const plan = planMb51SaveBatches(fileName, uniqueRows, {

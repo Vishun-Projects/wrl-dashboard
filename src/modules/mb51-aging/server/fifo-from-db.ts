@@ -16,6 +16,7 @@ import type {
   Mb51AgingThinRow,
 } from '@/modules/mb51-aging/types';
 import { withAppClient } from '@/lib/read-model/db';
+import { mergeMb51ToCanonical } from '@/modules/mb51-aging/server/merge-imports';
 
 export const DEFAULT_PARAM_HASH = 'default';
 const EPS = 1e-6;
@@ -662,6 +663,12 @@ export async function materializeMb51Snapshot(opts: {
   );
 }
 
-export async function buildDefaultSnapshot(importId: string): Promise<void> {
-  await materializeMb51Snapshot({ importId, paramHash: DEFAULT_PARAM_HASH });
+/** Merge every import into one overall dataset, then rebuild the default FIFO snapshot. */
+export async function buildDefaultSnapshot(_importId?: string): Promise<void> {
+  const canonical = await mergeMb51ToCanonical();
+  if (!canonical) return;
+  await materializeMb51Snapshot({
+    importId: canonical,
+    paramHash: DEFAULT_PARAM_HASH,
+  });
 }

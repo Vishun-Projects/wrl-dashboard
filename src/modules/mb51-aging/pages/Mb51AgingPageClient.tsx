@@ -430,7 +430,8 @@ export default function Mb51AgingPageClient() {
   const [latestImport, setLatestImport] = useState<Mb51AgingImportMeta | null>(null);
   const [imports, setImports] = useState<Mb51AgingImportMeta[]>([]);
   const [activeImportId, setActiveImportId] = useState<string | null>(null);
-  const [appendOnUpload, setAppendOnUpload] = useState(false);
+  /** Escape hatch only — default grows the one overall dataset / snapshot. */
+  const [forceNewImport, setForceNewImport] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadMsg, setLoadMsg] = useState<string>('Loading MB51 Aging Report from portal database…');
   const [isErrMsg, setIsErrMsg] = useState(false);
@@ -760,7 +761,12 @@ export default function Mb51AgingPageClient() {
     async (
       fileName: string,
       parsedRows: Mb51AgingMovement[],
-      opts?: { appendToImportId?: string | null; manageLoading?: boolean }
+      opts?: {
+        appendToImportId?: string | null;
+        manageLoading?: boolean;
+        /** Multi-file path forces overall merge (false). */
+        forceNewImport?: boolean;
+      }
     ) => {
       const manageLoading = opts?.manageLoading !== false;
       try {
@@ -768,14 +774,9 @@ export default function Mb51AgingPageClient() {
           setLoading(true);
           setIsErrMsg(false);
         }
-        const appendTo =
-          opts && 'appendToImportId' in opts
-            ? opts.appendToImportId ?? null
-            : appendOnUpload
-              ? activeImportId
-              : null;
         const meta = await saveMb51AgingRows(fileName, parsedRows, {
-          appendToImportId: appendTo,
+          appendToImportId: opts?.appendToImportId,
+          forceNewImport: opts?.forceNewImport ?? forceNewImport,
           onProgress: (saved, total) => {
             setLoadMsg(
               `Saving to database… ${saved.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')} rows`
@@ -803,7 +804,7 @@ export default function Mb51AgingPageClient() {
         if (manageLoading) setLoading(false);
       }
     },
-    [activeImportId, appendOnUpload, loadSnapshotView, selectImport]
+    [forceNewImport, loadSnapshotView, selectImport]
   );
 
   // Build movement records from sheets
@@ -866,7 +867,8 @@ export default function Mb51AgingPageClient() {
       setIsErrMsg(false);
       setAvailableSheets([]);
       setWbInstance(null);
-      let appendId: string | null = appendOnUpload ? activeImportId : null;
+      // Multi-file always grows the one overall import (one FIFO snapshot).
+      let appendId: string | null = activeImportId;
       const errors: string[] = [];
       let lastId: string | null = null;
       try {
@@ -889,9 +891,10 @@ export default function Mb51AgingPageClient() {
           const meta = await saveRowsToDatabase(f.name, parsed.rows, {
             appendToImportId: appendId,
             manageLoading: false,
+            forceNewImport: false,
           });
           lastId = meta.id;
-          if (appendOnUpload) appendId = meta.id;
+          appendId = meta.id;
         }
         if (!lastId) {
           setLoadMsg(errors.join('; ') || 'No files imported');
@@ -913,7 +916,7 @@ export default function Mb51AgingPageClient() {
         setLoading(false);
       }
     },
-    [activeImportId, appendOnUpload, applyUomInfo, saveRowsToDatabase]
+    [activeImportId, applyUomInfo, saveRowsToDatabase]
   );
 
   // File loading — single file keeps sheet picker; multi skips straight to import
@@ -1240,37 +1243,18 @@ export default function Mb51AgingPageClient() {
         <div>
           <h1>MB51 Material Aging Report (FIFO)</h1>
           <div className="sub">
-            Aging calculated on Posting Date &nbsp;|&nbsp; Portal Database Backed
+            Aging calculated on Posting Date &nbsp;|&nbsp; Overall dataset (one FIFO snapshot)
             {latestImport?.importedAt && (
-              <span> &bull; Saved: {new Date(latestImport.importedAt).toLocaleDateString()}</span>
+              <span>
+                {' '}
+                &bull; {latestImport.fileName} ({latestImport.rowCount.toLocaleString('en-IN')} rows)
+                &bull; Saved: {new Date(latestImport.importedAt).toLocaleDateString()}
+              </span>
             )}
           </div>
         </div>
         <div className="spacer" />
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {imports.length > 0 && (
-            <label className="import-pick" title="Each upload is kept as its own import">
-              <span>Import</span>
-              <select
-                value={activeImportId ?? ''}
-                disabled={loading}
-                onChange={(e) => {
-                  const id = e.target.value || null;
-                  selectImport(id);
-                  setLoading(true);
-                  setLoadMsg('Loading import…');
-                  void loadSnapshotView('default', id).finally(() => setLoading(false));
-                }}
-              >
-                {imports.map((imp) => (
-                  <option key={imp.id} value={imp.id}>
-                    {imp.fileName} · {imp.rowCount.toLocaleString('en-IN')} rows ·{' '}
-                    {new Date(imp.importedAt).toLocaleDateString()}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
           <span className="btn" style={{ cursor: 'default' }}>
             Aging Report (FIFO)
           </span>
@@ -1332,8 +1316,8 @@ export default function Mb51AgingPageClient() {
               <b>Select or drop one or more MB51 exports (.xlsx / .xls / .csv)</b>
               <div className="msg">
                 Required columns: Posting Date, Material, Material Description, Material Group,
-                Qty in unit of entry, Supplier, Supplier Name. Multi-select creates a separate
-                import per file (or appends all when the checkbox below is on).
+                Qty in unit of entry, Supplier, Supplier Name. Files are merged into the overall
+                dataset and one FIFO snapshot is rebuilt (duplicates skipped).
               </div>
               <p>
                 <input
@@ -1352,10 +1336,10 @@ export default function Mb51AgingPageClient() {
                 <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 12 }}>
                   <input
                     type="checkbox"
-                    checked={appendOnUpload}
-                    onChange={(e) => setAppendOnUpload(e.target.checked)}
+                    checked={forceNewImport}
+                    onChange={(e) => setForceNewImport(e.target.checked)}
                   />
-                  Append to selected import (otherwise create a new import — prior data is kept)
+                  Start a separate import instead of growing the overall dataset (not recommended)
                 </label>
               )}
 

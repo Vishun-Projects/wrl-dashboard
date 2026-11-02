@@ -349,7 +349,8 @@ export default function Mb51TablePageClient() {
   const [latestImport, setLatestImport] = useState<Mb51AgingImportMeta | null>(null);
   const [imports, setImports] = useState<Mb51AgingImportMeta[]>([]);
   const [activeImportId, setActiveImportId] = useState<string | null>(null);
-  const [appendOnUpload, setAppendOnUpload] = useState(false);
+  /** Escape hatch only — default grows the one overall dataset / snapshot. */
+  const [forceNewImport, setForceNewImport] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadMsg, setLoadMsg] = useState('Loading MB51 Movements Data from portal database…');
   const [isErrMsg, setIsErrMsg] = useState(false);
@@ -569,7 +570,12 @@ export default function Mb51TablePageClient() {
     async (
       fileName: string,
       movementRows: MovementRow[],
-      opts?: { appendToImportId?: string | null; manageLoading?: boolean; hideUpload?: boolean }
+      opts?: {
+        appendToImportId?: string | null;
+        manageLoading?: boolean;
+        hideUpload?: boolean;
+        forceNewImport?: boolean;
+      }
     ) => {
       const manageLoading = opts?.manageLoading !== false;
       const hideUpload = opts?.hideUpload !== false;
@@ -578,14 +584,9 @@ export default function Mb51TablePageClient() {
           setLoading(true);
           setIsErrMsg(false);
         }
-        const appendTo =
-          opts && 'appendToImportId' in opts
-            ? opts.appendToImportId ?? null
-            : appendOnUpload
-              ? activeImportId
-              : null;
         const meta = await saveMb51AgingRows(fileName, movementRows as Mb51AgingMovement[], {
-          appendToImportId: appendTo,
+          appendToImportId: opts?.appendToImportId,
+          forceNewImport: opts?.forceNewImport ?? forceNewImport,
           onProgress: (saved, total) => {
             setLoadMsg(
               `Saving to database… ${saved.toLocaleString('en-IN')} / ${total.toLocaleString('en-IN')} rows`
@@ -624,45 +625,7 @@ export default function Mb51TablePageClient() {
         if (manageLoading) setLoading(false);
       }
     },
-    [activeImportId, appendOnUpload, selectImport]
-  );
-
-  const switchImport = useCallback(
-    async (id: string) => {
-      selectImport(id);
-      setLoading(true);
-      setLoadMsg('Loading import…');
-      try {
-        const meta = await fetchMb51Meta(id);
-        setImports(meta.imports ?? []);
-        if (!meta.latestImport) throw new Error('Import not found');
-        setLatestImport(meta.latestImport);
-        const mn = meta.latestImport.minPostingSerial ?? 0;
-        const mx = meta.latestImport.maxPostingSerial ?? 0;
-        setDateFrom(serialToISO(mn));
-        setDateTo(serialToISO(mx));
-        setMinDateLimit(serialToISO(mn));
-        setMaxDateLimit(serialToISO(mx));
-        const facets = await fetchMb51Facets('', id);
-        const toOpt = (xs: { id: string; text: string }[]) =>
-          xs.map((x) => ({ id: x.id, text: x.text, lc: x.text.toLowerCase() }));
-        setFacetVendors(toOpt(facets.vendors));
-        setFacetGroups(toOpt(facets.groups));
-        setFacetMaterials(toOpt(facets.materials));
-        setFacetPlants(toOpt(facets.plants));
-        setFacetMovements(toOpt(facets.movements));
-        setPage(1);
-        setLoadMsg('');
-        setIsErrMsg(false);
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Failed to load import';
-        setLoadMsg(message);
-        setIsErrMsg(true);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [selectImport]
+    [forceNewImport, selectImport]
   );
 
   // Parse selected workbook sheets
@@ -735,7 +698,8 @@ export default function Mb51TablePageClient() {
       setAvailableSheets([]);
       setSelectedSheets(new Set());
       setWbInstance(null);
-      let appendId: string | null = appendOnUpload ? activeImportId : null;
+      // Multi-file always grows the one overall import (one FIFO snapshot).
+      let appendId: string | null = activeImportId;
       const errors: string[] = [];
       let lastMeta: Mb51AgingImportMeta | null = null;
       try {
@@ -760,8 +724,9 @@ export default function Mb51TablePageClient() {
             appendToImportId: appendId,
             manageLoading: false,
             hideUpload: false,
+            forceNewImport: false,
           });
-          if (appendOnUpload) appendId = lastMeta.id;
+          appendId = lastMeta.id;
         }
         if (!lastMeta) {
           setLoadMsg(errors.join('; ') || 'No files imported');
@@ -783,7 +748,7 @@ export default function Mb51TablePageClient() {
         setLoading(false);
       }
     },
-    [activeImportId, appendOnUpload, initFromRows, saveRowsToDatabase]
+    [activeImportId, initFromRows, saveRowsToDatabase]
   );
 
   // Read an Excel/CSV file in the browser (sheet picker when one multi-sheet workbook)
@@ -915,7 +880,7 @@ export default function Mb51TablePageClient() {
         <div>
           <h1>MB51 Material Movements Data (Tabular)</h1>
           <div className="sub">
-            All imported SAP MB51 material movement records&nbsp; | &nbsp;Portal Database Backed
+            Overall MB51 movements&nbsp; | &nbsp;One combined dataset
             {latestImport?.importedAt && (
               <span>
                 {' '}&bull; File: <b>{latestImport.fileName}</b> ({latestImport.rowCount.toLocaleString('en-IN')} records)
@@ -926,26 +891,6 @@ export default function Mb51TablePageClient() {
         </div>
         <div className="spacer" />
         <div className="header-actions">
-          {imports.length > 0 && (
-            <label className="import-pick" title="Each upload is kept as its own import">
-              <span>Import</span>
-              <select
-                value={activeImportId ?? ''}
-                disabled={loading}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  if (id) void switchImport(id);
-                }}
-              >
-                {imports.map((imp) => (
-                  <option key={imp.id} value={imp.id}>
-                    {imp.fileName} · {imp.rowCount.toLocaleString('en-IN')} rows ·{' '}
-                    {new Date(imp.importedAt).toLocaleDateString()}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
           <Link href="/report/mb51-aging" className="btn sec">Aging Report (FIFO)</Link>
           <span className="btn current-view">Movements Table</span>
           {(rows.length > 0 || imports.length > 0) && (
@@ -984,8 +929,8 @@ export default function Mb51TablePageClient() {
               <b>Select or drop one or more MB51 exports (.xlsx / .xls / .csv)</b>
               <div className="msg">
                 Required columns: Posting Date, Material, Qty in unit of entry. Supplier, description,
-                group, plant and movement details are optional. Multi-select creates a separate
-                import per file (or appends all when the checkbox below is on).
+                group, plant and movement details are optional. Files merge into the overall
+                dataset and one FIFO snapshot is rebuilt (duplicates skipped).
               </div>
               <p>
                 <input
@@ -1004,10 +949,10 @@ export default function Mb51TablePageClient() {
                 <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 12 }}>
                   <input
                     type="checkbox"
-                    checked={appendOnUpload}
-                    onChange={(e) => setAppendOnUpload(e.target.checked)}
+                    checked={forceNewImport}
+                    onChange={(e) => setForceNewImport(e.target.checked)}
                   />
-                  Append to selected import (otherwise create a new import — prior data is kept)
+                  Start a separate import instead of growing the overall dataset (not recommended)
                 </label>
               )}
 
