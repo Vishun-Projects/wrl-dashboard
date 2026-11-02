@@ -732,11 +732,13 @@ export default function Mb51AgingPageClient() {
       fr.onerror = () => reject(new Error(`Could not read ${f.name}`));
       fr.onload = () => {
         try {
+          // Avoid dense:true — some SAP exports list sheet names (e.g. "MB51")
+          // that then aren't present on wb.Sheets under dense mode.
           resolve(
             XLSX.read(new Uint8Array(fr.result as ArrayBuffer), {
               type: 'array',
-              cellDates: false,
-              dense: true,
+              cellDates: true,
+              raw: true,
             })
           );
         } catch (err) {

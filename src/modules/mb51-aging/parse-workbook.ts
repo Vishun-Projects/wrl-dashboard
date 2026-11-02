@@ -129,6 +129,66 @@ function missingNeedLabels(ix: Record<string, number>): string[] {
   return NEED_KEYS.filter((k) => ix[k] < 0).map((k) => NEED_LABEL[k]);
 }
 
+/** Sheets that SheetJS actually loaded (Workbook can list names for missing/chart sheets). */
+export function listLoadedSheetNames(wb: XLSX.WorkBook): string[] {
+  const fromBook = (wb.SheetNames ?? []).filter((n) => wb.Sheets?.[n] != null);
+  if (fromBook.length) return fromBook;
+  return Object.keys(wb.Sheets ?? {});
+}
+
+/**
+ * Map requested names onto sheets that exist. SAP/Excel sometimes lists a tab
+ * (e.g. "MB51") that isn't in `wb.Sheets` after read — fall back to loaded sheets.
+ */
+export function resolveMb51SheetNames(
+  wb: XLSX.WorkBook,
+  requested: string[]
+): { sheets: string[]; notes: string[] } {
+  const available = listLoadedSheetNames(wb);
+  const notes: string[] = [];
+  if (!available.length) {
+    return {
+      sheets: [],
+      notes: [
+        `No readable sheets in workbook (SheetNames=${JSON.stringify(wb.SheetNames ?? [])}).`,
+      ],
+    };
+  }
+
+  const byNorm = new Map(
+    available.map((n) => [normHeader(n), n] as const)
+  );
+
+  const resolved: string[] = [];
+  const missing: string[] = [];
+  for (const raw of requested.length ? requested : available) {
+    if (wb.Sheets?.[raw] != null) {
+      if (!resolved.includes(raw)) resolved.push(raw);
+      continue;
+    }
+    const fuzzy = byNorm.get(normHeader(raw));
+    if (fuzzy) {
+      if (!resolved.includes(fuzzy)) resolved.push(fuzzy);
+      if (fuzzy !== raw) notes.push(`Sheet "${raw}" matched as "${fuzzy}".`);
+      continue;
+    }
+    missing.push(raw);
+  }
+
+  if (missing.length) {
+    notes.push(
+      `Sheet${missing.length === 1 ? '' : 's'} ${missing.map((n) => `"${n}"`).join(', ')} ` +
+        `not found (available: ${available.map((n) => `"${n}"`).join(', ')}).`
+    );
+  }
+
+  if (!resolved.length) {
+    notes.push(`Using all readable sheets: ${available.map((n) => `"${n}"`).join(', ')}.`);
+    return { sheets: available, notes };
+  }
+  return { sheets: resolved, notes };
+}
+
 export function parseMb51Workbook(
   wb: XLSX.WorkBook,
   sheetNames: string[]
@@ -142,10 +202,15 @@ export function parseMb51Workbook(
   let skippedBadQty = 0;
   let skippedBlankMat = 0;
 
-  if (!sheetNames.length) {
+  const { sheets: resolvedNames, notes } = resolveMb51SheetNames(wb, sheetNames);
+  reasons.push(...notes);
+
+  if (!resolvedNames.length) {
     return {
       rows: [],
-      reasons: ['Workbook has no sheets selected.'],
+      reasons: reasons.length
+        ? reasons
+        : ['Workbook has no readable sheets.'],
       qtyCol,
       uomCol,
       uomSeen,
@@ -155,7 +220,7 @@ export function parseMb51Workbook(
     };
   }
 
-  for (const sn of sheetNames) {
+  for (const sn of resolvedNames) {
     const ws = wb.Sheets[sn];
     if (!ws) {
       reasons.push(`Sheet "${sn}": not found in workbook.`);

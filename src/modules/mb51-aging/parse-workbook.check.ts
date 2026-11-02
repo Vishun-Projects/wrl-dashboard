@@ -6,6 +6,7 @@ import {
   normHeader,
   parseMb51Workbook,
   parseQty,
+  resolveMb51SheetNames,
   toPostingSerial,
 } from '@/modules/mb51-aging/parse-workbook';
 
@@ -68,5 +69,23 @@ XLSX.utils.book_append_sheet(
 const parsedTitle = parseMb51Workbook(titled, ['Data']);
 assert.equal(parsedTitle.rows.length, 1);
 assert.equal(parsedTitle.rows[0].q, 3);
+
+// Ghost sheet name (listed but missing) → fall back to real sheets
+const ghost = XLSX.utils.book_new();
+XLSX.utils.book_append_sheet(
+  ghost,
+  XLSX.utils.aoa_to_sheet([
+    ['Posting Date', 'Material', 'Quantity'],
+    ['01.04.2025', 'M9', 4],
+  ]),
+  'Sheet1'
+);
+ghost.SheetNames = ['MB51', 'Sheet1'];
+const resolved = resolveMb51SheetNames(ghost, ['MB51']);
+assert.deepEqual(resolved.sheets, ['Sheet1']);
+assert.match(resolved.notes.join(' '), /MB51/);
+const parsedGhost = parseMb51Workbook(ghost, ['MB51']);
+assert.equal(parsedGhost.rows.length, 1);
+assert.equal(parsedGhost.rows[0].m, 'M9');
 
 console.log('mb51-aging parse-workbook check: ok');
