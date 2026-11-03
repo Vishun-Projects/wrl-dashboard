@@ -924,10 +924,10 @@ export default function Mb51TablePageClient() {
         <div>
           <h1>MB51 Material Movements Data (Tabular)</h1>
           <div className="sub">
-            Overall MB51 movements&nbsp; | &nbsp;One combined dataset
+            Overall MB51 movements&nbsp;|&nbsp;One combined dataset
             {latestImport?.importedAt && (
               <span>
-                {' '}&bull; File: <b>{latestImport.fileName}</b> ({latestImport.rowCount.toLocaleString('en-IN')} records)
+                {' '}&bull; {latestImport.rowCount.toLocaleString('en-IN')} records
                 {' '}&bull; Imported: {new Date(latestImport.importedAt).toLocaleDateString()}
               </span>
             )}

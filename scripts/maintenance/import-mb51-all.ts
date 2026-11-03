@@ -304,7 +304,7 @@ async function main() {
     if (importId) {
       await client.query(
         `UPDATE mb51_aging_imports SET file_name = $2 WHERE id = $1`,
-        [importId, `MB51 all (${paths.map((p) => basename(p)).join(' + ')})`]
+        [importId, 'MB51 all']
       );
     }
     return res.rows[0];

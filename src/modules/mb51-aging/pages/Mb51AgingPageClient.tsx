@@ -1426,11 +1426,11 @@ export default function Mb51AgingPageClient() {
         <div>
           <h1>MB51 Material Aging Report (FIFO)</h1>
           <div className="sub">
-            Aging calculated on Posting Date &nbsp;|&nbsp; Overall dataset (one FIFO snapshot)
+            Aging calculated on Posting Date&nbsp;|&nbsp;Overall dataset (one FIFO snapshot)
             {latestImport?.importedAt && (
               <span>
                 {' '}
-                &bull; {latestImport.fileName} ({latestImport.rowCount.toLocaleString('en-IN')} rows)
+                &bull; {latestImport.rowCount.toLocaleString('en-IN')} rows
                 &bull; Saved: {new Date(latestImport.importedAt).toLocaleDateString()}
               </span>
             )}
