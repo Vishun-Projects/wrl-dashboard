@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { dedupeMb51Movements, mb51MovementDedupeKey } from '@/modules/mb51-aging/dedupe';
+import {
+  filterMb51AgainstExisting,
+  mb51MovementDedupeKey,
+} from '@/modules/mb51-aging/dedupe';
 import {
   MB51_LOAD_CHUNK,
   MB51_SAVE_CHUNK,
@@ -48,6 +51,8 @@ const append = planMb51SaveBatches('part2.xlsx', rows, {
 });
 assert.equal(append[0].importId, 'prior-uuid');
 assert.equal(append[0].seqOffset, 10_000);
+assert.equal(append[0].dedupeBeforeSeq, 10_000);
+assert.equal(append[1].dedupeBeforeSeq, 10_000, 'later chunks keep start-of-upload boundary');
 assert.equal(append[0].replaceExisting, false);
 assert.equal(append[0].expectedTotal, 10_000 + 2501);
 
@@ -103,8 +108,14 @@ const twin: Mb51AgingMovement = {
 };
 const twin2 = { ...twin, s: 99, md: 'ignored for key', vn: 'also ignored' };
 assert.equal(mb51MovementDedupeKey(twin), mb51MovementDedupeKey(twin2));
-const deduped = dedupeMb51Movements([twin, twin2, { ...twin, dc: 'DOC2' }]);
-assert.equal(deduped.rows.length, 2);
-assert.equal(deduped.skipped, 1);
+// In-file duplicates kept; only keys already in DB are dropped.
+const kept = filterMb51AgainstExisting([twin, twin2, { ...twin, dc: 'DOC2' }], new Set());
+assert.equal(kept.rows.length, 3);
+const againstDb = filterMb51AgainstExisting(
+  [twin, twin2, { ...twin, dc: 'DOC2' }],
+  new Set([mb51MovementDedupeKey(twin)])
+);
+assert.equal(againstDb.rows.length, 1);
+assert.equal(againstDb.skipped, 2);
 
 console.log('mb51-aging save-client check: ok');

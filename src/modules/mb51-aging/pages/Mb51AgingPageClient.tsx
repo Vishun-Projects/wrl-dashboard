@@ -1501,7 +1501,7 @@ export default function Mb51AgingPageClient() {
                 Required: Posting Date, Material, Quantity (or Qty in unit of entry). Optional: Plant,
                 Material Document, Material Description, Material Group, Base Unit of Measure /
                 Unit of Entry, Supplier, SAP Vendor Name (from Vendor Master), Movement Type, Text. Files merge into the
-                overall dataset; one FIFO snapshot is rebuilt (duplicates skipped).
+                overall dataset; one FIFO snapshot is rebuilt (cross-file duplicates skipped; same-file duplicates kept).
               </div>
               <p style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
                 <button

@@ -4,7 +4,8 @@ const MERGE_MS = 300_000;
 
 /**
  * Collapse every MB51 import into one canonical dataset so FIFO / KPIs are overall.
- * Oldest import wins as the id; duplicate movement lines are dropped; other imports go away.
+ * Oldest import wins as the id; lines already on the canonical fingerprint are
+ * dropped from later imports; same-file duplicate lines are kept.
  */
 export async function mergeMb51ToCanonical(): Promise<string | null> {
   return withAppClient(
@@ -49,26 +50,8 @@ export async function mergeMb51ToCanonical(): Promise<string | null> {
           [canonical]
         );
 
-        // In-import dedupe after the move (unique index may already have blocked some).
-        await client.query(
-          `
-          DELETE FROM mb51_aging_rows a
-          USING mb51_aging_rows b
-          WHERE a.import_id = $1
-            AND b.import_id = $1
-            AND a.id > b.id
-            AND a.material_document = b.material_document
-            AND a.plant = b.plant
-            AND a.material = b.material
-            AND a.movement_type = b.movement_type
-            AND a.posting_date_serial = b.posting_date_serial
-            AND a.qty = b.qty
-            AND a.vendor = b.vendor
-            AND a.uom = b.uom
-            AND a.item_text = b.item_text
-          `,
-          [canonical]
-        );
+        // Keep in-file duplicate lines; only cross-import overlaps were removed above.
+        await client.query(`DROP INDEX IF EXISTS idx_mb51_aging_rows_import_dedupe`);
 
         await client.query(`DELETE FROM mb51_aging_imports WHERE id <> $1`, [canonical]);
 

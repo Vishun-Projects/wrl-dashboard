@@ -146,6 +146,8 @@ async function importOneFile(opts: {
           replaceExisting: replaceFirst && importId == null,
           importId,
           seqOffset,
+          // Freeze at this file's start so in-file dups across chunks are kept.
+          dedupeBeforeSeq: startOffset,
           finalize: finalize && isLast,
         });
         importId = meta.id;

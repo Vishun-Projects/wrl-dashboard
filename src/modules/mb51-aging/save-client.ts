@@ -1,6 +1,5 @@
 import { fetchWithRetry } from '@/lib/net/fetch-with-retry';
 import { fetchMb51Meta } from '@/modules/mb51-aging/api-client';
-import { dedupeMb51Movements } from '@/modules/mb51-aging/dedupe';
 import type { Mb51AgingImportMeta, Mb51AgingMovement } from '@/modules/mb51-aging/types';
 
 /**
@@ -76,6 +75,8 @@ export type Mb51SaveBatch = {
   replaceExisting: boolean;
   importId: string | null;
   seqOffset: number;
+  /** Fingerprints with seq_order below this are treated as already in DB. */
+  dedupeBeforeSeq: number;
   expectedTotal: number;
 };
 
@@ -114,6 +115,8 @@ export function planMb51SaveBatches(
       replaceExisting: wipe && offset === 0,
       importId: priorId,
       seqOffset: priorCount + offset,
+      // Freeze at upload start so same-file dups in later chunks are not blocked.
+      dedupeBeforeSeq: priorCount,
       expectedTotal,
     });
   }
@@ -131,6 +134,7 @@ export function buildMb51SaveBody(
     replaceExisting: batch.replaceExisting && !importId,
     importId: importId ?? batch.importId,
     seqOffset: batch.seqOffset,
+    dedupeBeforeSeq: batch.dedupeBeforeSeq,
     expectedTotal: batch.expectedTotal,
     finalize: opts?.finalize === true,
     packed: true,
@@ -197,10 +201,7 @@ export async function saveMb51AgingRows(
       : onProgressOrOpts ?? {};
   const onProgress = opts.onProgress;
 
-  // Drop identical lines inside this upload before chunking.
-  const { rows: uniqueRows } = dedupeMb51Movements(rows);
-  if (!uniqueRows.length) throw new Error('No rows to save after removing duplicates');
-
+  // Keep in-file duplicates; server skips only fingerprints already in DB.
   let priorCount = 0;
   let priorId: string | null = null;
   if (!opts.forceNewImport) {
@@ -217,14 +218,14 @@ export async function saveMb51AgingRows(
     }
   }
 
-  const plan = planMb51SaveBatches(fileName, uniqueRows, {
+  const plan = planMb51SaveBatches(fileName, rows, {
     priorImportId: priorId,
     priorRowCount: priorCount,
     replaceExisting: false,
   });
   let importId: string | null = priorId;
   let latest: Mb51AgingImportMeta | null = null;
-  const newTotal = uniqueRows.length;
+  const newTotal = rows.length;
 
   const markProgress = (batch: Mb51SaveBatch) => {
     onProgress?.(

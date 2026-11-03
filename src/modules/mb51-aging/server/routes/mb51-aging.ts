@@ -49,6 +49,10 @@ export async function POST(req: NextRequest) {
         ? body.importId.trim()
         : null;
     const seqOffset = Math.max(0, Number(body.seqOffset) || 0);
+    const dedupeBeforeSeq =
+      body.dedupeBeforeSeq != null && Number.isFinite(Number(body.dedupeBeforeSeq))
+        ? Math.max(0, Number(body.dedupeBeforeSeq))
+        : undefined;
     const expectedTotal = Math.max(0, Number(body.expectedTotal) || 0) || undefined;
     const finalize =
       typeof body.finalize === 'boolean' ? body.finalize : undefined;
@@ -71,6 +75,7 @@ export async function POST(req: NextRequest) {
       replaceExisting,
       importId,
       seqOffset,
+      dedupeBeforeSeq,
       expectedTotal,
       finalize,
     });

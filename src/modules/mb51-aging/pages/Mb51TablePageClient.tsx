@@ -974,7 +974,7 @@ export default function Mb51TablePageClient() {
               <div className="msg">
                 Required: Posting Date, Material, Quantity (or Qty in unit of entry). Optional: Plant,
                 Material Document, description, group, UoM, Supplier, Movement Type, Text. Files merge
-                into the overall dataset; one FIFO snapshot is rebuilt (duplicates skipped).
+                into the overall dataset; one FIFO snapshot is rebuilt (cross-file duplicates skipped; same-file duplicates kept).
               </div>
               <p style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
                 <button

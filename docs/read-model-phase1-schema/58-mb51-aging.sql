@@ -42,35 +42,10 @@ CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_import_id
 CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_import_seq
   ON mb51_aging_rows (import_id, seq_order);
 
--- One line per fingerprint inside an import (append / re-upload must not double-count).
--- Keep the earliest row when duplicates already exist.
-DELETE FROM mb51_aging_rows a
-USING mb51_aging_rows b
-WHERE a.import_id = b.import_id
-  AND a.id > b.id
-  AND a.material_document = b.material_document
-  AND a.plant = b.plant
-  AND a.material = b.material
-  AND a.movement_type = b.movement_type
-  AND a.posting_date_serial = b.posting_date_serial
-  AND a.qty = b.qty
-  AND a.vendor = b.vendor
-  AND a.uom = b.uom
-  AND a.item_text = b.item_text;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mb51_aging_rows_import_dedupe
-  ON mb51_aging_rows (
-    import_id,
-    material_document,
-    plant,
-    material,
-    movement_type,
-    posting_date_serial,
-    qty,
-    vendor,
-    uom,
-    item_text
-  );
+-- Same-file duplicate movement lines are kept (FIFO needs every qty).
+-- Cross-file / re-upload overlaps are skipped in application code.
+-- Drop legacy unique fingerprint index if present.
+DROP INDEX IF EXISTS idx_mb51_aging_rows_import_dedupe;
 
 CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_fifo_scan
   ON mb51_aging_rows (

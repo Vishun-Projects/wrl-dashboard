@@ -1,9 +1,9 @@
 import type { Mb51AgingMovement } from '@/modules/mb51-aging/types';
 
 /**
- * Stable key for one MB51 movement line within an import.
- * Same doc + plant + material + movement + date + qty + vendor + uom + text
- * → treated as the same entry (append / re-upload must not double-count).
+ * Stable fingerprint for one MB51 movement line.
+ * Used to skip lines already present from another file / earlier upload —
+ * not to collapse duplicates inside a single file.
  */
 export function mb51MovementDedupeKey(r: Mb51AgingMovement): string {
   return [
@@ -19,7 +19,28 @@ export function mb51MovementDedupeKey(r: Mb51AgingMovement): string {
   ].join('\u0001');
 }
 
-/** Keep first occurrence; drop later identical lines. */
+/**
+ * Keep every in-file copy. Drop a line only when its fingerprint is already
+ * in `existing` (loaded from DB before this upload / file).
+ */
+export function filterMb51AgainstExisting(
+  rows: Mb51AgingMovement[],
+  existing: Set<string>
+): { rows: Mb51AgingMovement[]; skipped: number } {
+  if (!rows.length) return { rows, skipped: 0 };
+  if (!existing.size) return { rows, skipped: 0 };
+  const out: Mb51AgingMovement[] = [];
+  for (const r of rows) {
+    if (existing.has(mb51MovementDedupeKey(r))) continue;
+    out.push(r);
+  }
+  return { rows: out, skipped: rows.length - out.length };
+}
+
+/**
+ * @deprecated Prefer filterMb51AgainstExisting — in-file duplicates must be kept.
+ * Kept for older checks that still assert unique collapsing.
+ */
 export function dedupeMb51Movements(rows: Mb51AgingMovement[]): {
   rows: Mb51AgingMovement[];
   skipped: number;

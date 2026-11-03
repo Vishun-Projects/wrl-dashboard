@@ -1,6 +1,6 @@
 import { withAppClient } from '@/lib/read-model/db';
 import {
-  dedupeMb51Movements,
+  filterMb51AgainstExisting,
   mb51MovementDedupeKey,
 } from '@/modules/mb51-aging/dedupe';
 import { buildDefaultSnapshot } from '@/modules/mb51-aging/server/fifo-from-db';
@@ -69,10 +69,15 @@ function toMeta(imp: {
   };
 }
 
+/**
+ * Fingerprints already in DB from *before* this upload/file.
+ * `onlyBeforeSeq` = prior row boundary so same-file dups in later chunks stay.
+ */
 async function loadExistingDedupeKeys(
   client: PoolClient,
   importId: string,
-  rows: Mb51AgingMovement[]
+  rows: Mb51AgingMovement[],
+  onlyBeforeSeq: number
 ): Promise<Set<string>> {
   const docs = [...new Set(rows.map((r) => r.dc ?? ''))];
   if (!docs.length) return new Set();
@@ -94,8 +99,9 @@ async function loadExistingDedupeKeys(
     FROM mb51_aging_rows
     WHERE import_id = $1
       AND material_document = ANY($2::text[])
+      AND seq_order < $3
     `,
-    [importId, docs]
+    [importId, docs, Math.max(0, onlyBeforeSeq)]
   );
 
   const keys = new Set<string>();
@@ -121,17 +127,24 @@ async function loadExistingDedupeKeys(
   return keys;
 }
 
-/** Drop lines already stored on this import (append / overlapping Part2). */
+/**
+ * Keep all in-file duplicates. Skip only fingerprints already present from
+ * earlier files / prior uploads (`seq_order < dedupeBeforeSeq`).
+ */
 async function filterNewRowsForImport(
   client: PoolClient,
   importId: string,
-  rows: Mb51AgingMovement[]
+  rows: Mb51AgingMovement[],
+  dedupeBeforeSeq: number
 ): Promise<Mb51AgingMovement[]> {
-  const { rows: unique } = dedupeMb51Movements(rows);
-  if (!unique.length) return [];
-  const existing = await loadExistingDedupeKeys(client, importId, unique);
-  if (!existing.size) return unique;
-  return unique.filter((r) => !existing.has(mb51MovementDedupeKey(r)));
+  if (!rows.length) return [];
+  const existing = await loadExistingDedupeKeys(
+    client,
+    importId,
+    rows,
+    dedupeBeforeSeq
+  );
+  return filterMb51AgainstExisting(rows, existing).rows;
 }
 
 async function insertRowBatch(
@@ -196,18 +209,6 @@ async function insertRowBatch(
           item_text,
           seq_order
         ) VALUES ${placeholders.join(',')}
-        ON CONFLICT (
-          import_id,
-          material_document,
-          plant,
-          material,
-          movement_type,
-          posting_date_serial,
-          qty,
-          vendor,
-          uom,
-          item_text
-        ) DO NOTHING
         `,
         values
       );
@@ -394,6 +395,11 @@ export async function saveMb51AgingImport(opts: {
   seqOffset?: number;
   expectedTotal?: number;
   /**
+   * Only treat fingerprints with seq_order below this as "already in DB"
+   * (start-of-file / start-of-upload boundary). Defaults to seqOffset.
+   */
+  dedupeBeforeSeq?: number;
+  /**
    * When set by the client: true = last chunk (rebuild snapshot), false = mid chunk.
    * When omitted, fall back to seqOffset + rows.length vs expectedTotal.
    */
@@ -409,11 +415,18 @@ export async function saveMb51AgingImport(opts: {
     expectedTotal,
     finalize: finalizeOpt,
   } = opts;
+  const dedupeBeforeSeq =
+    typeof opts.dedupeBeforeSeq === 'number' && Number.isFinite(opts.dedupeBeforeSeq)
+      ? Math.max(0, opts.dedupeBeforeSeq)
+      : seqOffset;
 
   let finalizeImportId: string | null = null;
 
   const meta = await withAppClient(
     async (client) => {
+      // Same-file duplicates must insert; legacy unique fingerprint index blocks them.
+      await client.query(`DROP INDEX IF EXISTS idx_mb51_aging_rows_import_dedupe`);
+
       async function refreshImportCounts(id: string, rowCount: number, finalize: boolean) {
         if (finalize) {
           await client.query(
@@ -451,7 +464,12 @@ export async function saveMb51AgingImport(opts: {
           }
           const fresh = await withSapVendorNames(
             client,
-            await filterNewRowsForImport(client, existingImportId, rows)
+            await filterNewRowsForImport(
+              client,
+              existingImportId,
+              rows,
+              dedupeBeforeSeq
+            )
           );
           if (fresh.length) {
             // Use client seqOffset so parallel chunks don't collide on seq_order.
@@ -495,10 +513,10 @@ export async function saveMb51AgingImport(opts: {
           await client.query('DELETE FROM mb51_aging_imports');
         }
 
-        const { rows: deduped } = dedupeMb51Movements(rows);
-        const uniqueRows = await withSapVendorNames(client, deduped);
-        const plantCount = new Set(uniqueRows.map((r) => r.mv).filter(Boolean)).size;
-        const materialCount = new Set(uniqueRows.map((r) => r.m).filter(Boolean)).size;
+        // New import: keep every line from this file (including in-file duplicates).
+        const allRows = await withSapVendorNames(client, rows);
+        const plantCount = new Set(allRows.map((r) => r.mv).filter(Boolean)).size;
+        const materialCount = new Set(allRows.map((r) => r.m).filter(Boolean)).size;
 
         const ins = await client.query<{ id: string; imported_at: Date }>(
           `
@@ -507,13 +525,13 @@ export async function saveMb51AgingImport(opts: {
         ) VALUES ($1, $2, $3, $4, $5)
         RETURNING id, imported_at
         `,
-          [fileName, uploadedBy, uniqueRows.length, plantCount, materialCount]
+          [fileName, uploadedBy, allRows.length, plantCount, materialCount]
         );
 
         const importId = ins.rows[0]?.id;
         if (!importId) throw new Error('Failed to create MB51 import');
 
-        await insertRowBatch(client, importId, uniqueRows, seqOffset);
+        await insertRowBatch(client, importId, allRows, seqOffset);
         const chunkEnd = seqOffset + rows.length;
         const done =
           typeof finalizeOpt === 'boolean'
