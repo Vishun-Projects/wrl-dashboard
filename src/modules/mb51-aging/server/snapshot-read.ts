@@ -694,23 +694,32 @@ export async function fetchMb51Facets(opts?: {
         col: string,
         labelSql: string
       ): Promise<{ id: string; text: string }[]> {
+        // One row per id — same code with differing labels must not duplicate.
         const res = await client.query<{ id: string; text: string }>(
           like
             ? `
-              SELECT DISTINCT ${col} AS id, ${labelSql} AS text
-              FROM mb51_aging_rows
-              WHERE import_id = $1 AND ${col} <> ''
-                AND (
-                  lower(${col}) LIKE $2
-                  OR lower(${labelSql}) LIKE $2
-                )
+              SELECT id, text FROM (
+                SELECT DISTINCT ON (${col})
+                  ${col} AS id, ${labelSql} AS text
+                FROM mb51_aging_rows
+                WHERE import_id = $1 AND ${col} <> ''
+                  AND (
+                    lower(${col}) LIKE $2
+                    OR lower(${labelSql}) LIKE $2
+                  )
+                ORDER BY ${col}, text
+              ) d
               ORDER BY text
               LIMIT $3
               `
             : `
-              SELECT DISTINCT ${col} AS id, ${labelSql} AS text
-              FROM mb51_aging_rows
-              WHERE import_id = $1 AND ${col} <> ''
+              SELECT id, text FROM (
+                SELECT DISTINCT ON (${col})
+                  ${col} AS id, ${labelSql} AS text
+                FROM mb51_aging_rows
+                WHERE import_id = $1 AND ${col} <> ''
+                ORDER BY ${col}, text
+              ) d
               ORDER BY text
               LIMIT $2
               `,
@@ -721,29 +730,41 @@ export async function fetchMb51Facets(opts?: {
 
       // Prefer SAP Vendor Master name so filter shows "code - name" and
       // search matches both even when mb51_aging_rows.vendor_name is blank.
+      // DISTINCT ON (vendor) — same code can appear with different row names;
+      // duplicate ids break MultiSelect React keys / checkbox state.
       async function distinctVendors(): Promise<{ id: string; text: string }[]> {
         const nameExpr = `coalesce(nullif(m.vendor_name, ''), nullif(r.vendor_name, ''), '')`;
         const labelExpr = `r.vendor || CASE WHEN ${nameExpr} <> '' THEN ' - ' || ${nameExpr} ELSE '' END`;
         const res = await client.query<{ id: string; text: string }>(
           like
             ? `
-              SELECT DISTINCT r.vendor AS id, ${labelExpr} AS text
-              FROM mb51_aging_rows r
-              LEFT JOIN sap_vendor_master m ON m.vendor_code = r.vendor
-              WHERE r.import_id = $1 AND r.vendor <> ''
-                AND (
-                  lower(r.vendor) LIKE $2
-                  OR lower(${nameExpr}) LIKE $2
-                  OR lower(${labelExpr}) LIKE $2
-                )
+              SELECT id, text FROM (
+                SELECT DISTINCT ON (r.vendor)
+                  r.vendor AS id,
+                  ${labelExpr} AS text
+                FROM mb51_aging_rows r
+                LEFT JOIN sap_vendor_master m ON m.vendor_code = r.vendor
+                WHERE r.import_id = $1 AND r.vendor <> ''
+                  AND (
+                    lower(r.vendor) LIKE $2
+                    OR lower(${nameExpr}) LIKE $2
+                    OR lower(${labelExpr}) LIKE $2
+                  )
+                ORDER BY r.vendor, (m.vendor_name IS NULL) ASC, ${nameExpr} DESC
+              ) v
               ORDER BY text
               LIMIT $3
               `
             : `
-              SELECT DISTINCT r.vendor AS id, ${labelExpr} AS text
-              FROM mb51_aging_rows r
-              LEFT JOIN sap_vendor_master m ON m.vendor_code = r.vendor
-              WHERE r.import_id = $1 AND r.vendor <> ''
+              SELECT id, text FROM (
+                SELECT DISTINCT ON (r.vendor)
+                  r.vendor AS id,
+                  ${labelExpr} AS text
+                FROM mb51_aging_rows r
+                LEFT JOIN sap_vendor_master m ON m.vendor_code = r.vendor
+                WHERE r.import_id = $1 AND r.vendor <> ''
+                ORDER BY r.vendor, (m.vendor_name IS NULL) ASC, ${nameExpr} DESC
+              ) v
               ORDER BY text
               LIMIT $2
               `,

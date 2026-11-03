@@ -179,8 +179,13 @@ function MultiSelectDropdown({
 
   const shown = useMemo(() => {
     const search = query.trim().toLowerCase();
-    if (remote) return remote;
-    return search ? items.filter((item) => item.lc.includes(search)) : items;
+    const dedupe = (list: OptionItem[]) => {
+      const byId = new Map<string, OptionItem>();
+      for (const i of list) if (!byId.has(i.id)) byId.set(i.id, i);
+      return [...byId.values()];
+    };
+    if (remote) return dedupe(remote);
+    return dedupe(search ? items.filter((item) => item.lc.includes(search)) : items);
   }, [items, query, remote]);
 
   const limit = 400;
@@ -539,7 +544,14 @@ export default function Mb51TablePageClient() {
               : kind === 'movements'
                 ? setFacetMovements
                 : setFacetMaterials;
-      setter((prev) => (prev.some((x) => x.id === item.id) ? prev : [...prev, item]));
+      setter((prev) => {
+        const i = prev.findIndex((x) => x.id === item.id);
+        if (i < 0) return [...prev, item];
+        if (prev[i].text === item.text) return prev;
+        const next = prev.slice();
+        next[i] = item;
+        return next;
+      });
     },
     []
   );

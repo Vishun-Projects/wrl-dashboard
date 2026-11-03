@@ -141,7 +141,7 @@ export async function parseSapVendorMasterWorkbook(
     ? data
     : Buffer.from(data instanceof ArrayBuffer ? new Uint8Array(data) : data);
   // ExcelJS Buffer typing lags Node's Buffer generic
-  await wb.xlsx.load(bytes as Parameters<typeof wb.xlsx.load>[0]);
+  await wb.xlsx.load(bytes as unknown as Parameters<typeof wb.xlsx.load>[0]);
   const ws = wb.worksheets[0];
   if (!ws) throw new Error('No worksheet in vendor master file');
 

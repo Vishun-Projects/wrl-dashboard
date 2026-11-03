@@ -210,6 +210,11 @@ function MultiSelectDropdown({
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
+    const dedupe = (list: OptionItem[]) => {
+      const byId = new Map<string, OptionItem>();
+      for (const i of list) if (!byId.has(i.id)) byId.set(i.id, i);
+      return [...byId.values()];
+    };
     if (selectedOnly) {
       const pool = [...items, ...(remote ?? [])];
       const byId = new Map(pool.map((i) => [i.id, i]));
@@ -217,9 +222,9 @@ function MultiSelectDropdown({
         .map((id) => byId.get(id) ?? { id, text: id, lc: id.toLowerCase() })
         .filter((i) => !q || i.lc.includes(q));
     }
-    if (remote) return remote;
-    if (!q) return items;
-    return items.filter((i) => i.lc.includes(q));
+    if (remote) return dedupe(remote);
+    if (!q) return dedupe(items);
+    return dedupe(items.filter((i) => i.lc.includes(q)));
   }, [items, query, selectedOnly, selected, remote]);
 
   const lim = 400;
@@ -525,7 +530,15 @@ export default function Mb51AgingPageClient() {
             : kind === 'plants'
               ? setFacetPlants
               : setFacetMaterials;
-      setter((prev) => (prev.some((x) => x.id === item.id) ? prev : [...prev, item]));
+      setter((prev) => {
+        const i = prev.findIndex((x) => x.id === item.id);
+        if (i < 0) return [...prev, item];
+        // Prefer richer "code - name" label from search/master join
+        if (prev[i].text === item.text) return prev;
+        const next = prev.slice();
+        next[i] = item;
+        return next;
+      });
     },
     []
   );
