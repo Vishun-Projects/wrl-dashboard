@@ -312,7 +312,7 @@ export default function SapVendorMasterPageClient() {
       <div className="flex min-h-0 flex-1 flex-col p-4 pt-3">
         <AdminTableCard isEmpty={!loading && rows.length === 0} empty={<p className="text-sm text-slate-600">No vendors match this filter.</p>}>
           {loading ? (
-            <TableSkeleton rows={12} cols={4} />
+            <TableSkeleton rows={12} columns={4} />
           ) : (
             <AdminTable>
               <AdminThead>

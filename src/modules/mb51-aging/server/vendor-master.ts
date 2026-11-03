@@ -137,7 +137,11 @@ export async function parseSapVendorMasterWorkbook(
   data: ArrayBuffer | Buffer | Uint8Array
 ): Promise<SapVendorMasterRow[]> {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer));
+  const bytes = Buffer.isBuffer(data)
+    ? data
+    : Buffer.from(data instanceof ArrayBuffer ? new Uint8Array(data) : data);
+  // ExcelJS Buffer typing lags Node's Buffer generic
+  await wb.xlsx.load(bytes as Parameters<typeof wb.xlsx.load>[0]);
   const ws = wb.worksheets[0];
   if (!ws) throw new Error('No worksheet in vendor master file');
 
