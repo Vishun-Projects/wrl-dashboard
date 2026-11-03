@@ -16,6 +16,11 @@ import {
   listLoadedSheetNames,
   parseMb51Workbook,
 } from '@/modules/mb51-aging/parse-workbook';
+import {
+  MB51_XLSX_ZIP_FALLBACK_BYTES,
+  parseMb51Upload,
+  parseMb51XlsxZip,
+} from '@/modules/mb51-aging/parse-xlsx-zip';
 
 const DAY = 86400000;
 const EPOCH_OFFSET = 25569;
@@ -111,15 +116,26 @@ function MultiSelectDropdown({
   items,
   selected,
   onChange,
+  totalCount,
+  loadOptions,
+  onDiscover,
 }: {
   label: string;
   items: OptionItem[];
   selected: Set<string>;
   onChange: (selection: Set<string>) => void;
+  totalCount?: number;
+  loadOptions?: (q: string) => Promise<OptionItem[]>;
+  onDiscover?: (item: OptionItem) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [remote, setRemote] = useState<OptionItem[] | null>(null);
+  const [searching, setSearching] = useState(false);
   const popRef = useRef<HTMLDivElement>(null);
+  const searchGen = useRef(0);
+  const loadRef = useRef(loadOptions);
+  loadRef.current = loadOptions;
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -129,23 +145,59 @@ function MultiSelectDropdown({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [open]);
 
+  useEffect(() => {
+    if (!loadRef.current) {
+      setRemote(null);
+      setSearching(false);
+      return;
+    }
+    const q = query.trim();
+    if (!q) {
+      setRemote(null);
+      setSearching(false);
+      return;
+    }
+    const gen = ++searchGen.current;
+    setSearching(true);
+    const t = window.setTimeout(() => {
+      void loadRef
+        .current?.(q)
+        .then((hits) => {
+          if (gen !== searchGen.current) return;
+          setRemote(hits);
+        })
+        .catch(() => {
+          if (gen !== searchGen.current) return;
+          setRemote([]);
+        })
+        .finally(() => {
+          if (gen === searchGen.current) setSearching(false);
+        });
+    }, 280);
+    return () => window.clearTimeout(t);
+  }, [query]);
+
   const shown = useMemo(() => {
     const search = query.trim().toLowerCase();
+    if (remote) return remote;
     return search ? items.filter((item) => item.lc.includes(search)) : items;
-  }, [items, query]);
+  }, [items, query, remote]);
 
   const limit = 400;
   const visibleItems = shown.slice(0, limit);
 
   const buttonText = useMemo(() => {
     const count = selected.size;
-    if (count === 0) return `All ${label} (${items.length})`;
+    const allN = totalCount ?? items.length;
+    if (count === 0) return `All ${label} (${allN.toLocaleString('en-IN')})`;
     if (count === 1) {
-      const match = items.find((item) => selected.has(item.id));
+      const match =
+        items.find((item) => selected.has(item.id)) ??
+        remote?.find((item) => selected.has(item.id));
       return match ? match.text : '1 selected';
     }
     return `${count} selected`;
-  }, [selected, label, items]);
+  }, [selected, label, items, totalCount, remote]);
 
   return (
     <div className={`ms ${open ? 'open' : ''}`} ref={popRef}>
@@ -178,7 +230,10 @@ function MultiSelectDropdown({
               type="button"
               onClick={() => {
                 const next = new Set(selected);
-                shown.forEach((item) => next.add(item.id));
+                shown.forEach((item) => {
+                  next.add(item.id);
+                  onDiscover?.(item);
+                });
                 onChange(next);
               }}
             >
@@ -195,8 +250,10 @@ function MultiSelectDropdown({
                     checked={selected.has(item.id)}
                     onChange={(event) => {
                       const next = new Set(selected);
-                      if (event.target.checked) next.add(item.id);
-                      else next.delete(item.id);
+                      if (event.target.checked) {
+                        next.add(item.id);
+                        onDiscover?.(item);
+                      } else next.delete(item.id);
                       onChange(next);
                     }}
                   />
@@ -204,11 +261,13 @@ function MultiSelectDropdown({
                 </label>
               ))
             ) : (
-              <div className="empty">No match</div>
+              <div className="empty">{searching ? 'Searching…' : 'No match'}</div>
             )}
           </div>
           <div className="ms-foot">
-            {shown.length} of {items.length} shown
+            {remote
+              ? `${shown.length} match${shown.length === 1 ? '' : 'es'}${searching ? '…' : ''}`
+              : `${shown.length} of ${(totalCount ?? items.length).toLocaleString('en-IN')} shown`}
             {shown.length > limit ? ` (first ${limit} – refine search)` : ''}
           </div>
         </div>
@@ -286,6 +345,13 @@ export default function Mb51TablePageClient() {
   const [facetMaterials, setFacetMaterials] = useState<OptionItem[]>([]);
   const [facetPlants, setFacetPlants] = useState<OptionItem[]>([]);
   const [facetMovements, setFacetMovements] = useState<OptionItem[]>([]);
+  const [facetTotals, setFacetTotals] = useState({
+    vendors: 0,
+    materials: 0,
+    groups: 0,
+    plants: 0,
+    movements: 0,
+  });
 
   const initFromRows = useCallback((sourceRows: unknown[]) => {
     const normalizedRows = sourceRows.map((row, index) => normalizeMovement(row, index));
@@ -380,6 +446,7 @@ export default function Mb51TablePageClient() {
         setFacetMaterials(toOpt(facets.materials));
         setFacetPlants(toOpt(facets.plants));
         setFacetMovements(toOpt(facets.movements));
+        if (facets.totals) setFacetTotals(facets.totals);
         setShowUpload(false);
         setIsErrMsg(false);
         setLoadMsg('');
@@ -457,6 +524,48 @@ export default function Mb51TablePageClient() {
   const plantOptions = facetPlants;
   const movOptions = facetMovements;
 
+  const discoverFacet = useCallback(
+    (
+      kind: 'vendors' | 'groups' | 'materials' | 'plants' | 'movements',
+      item: OptionItem
+    ) => {
+      const setter =
+        kind === 'vendors'
+          ? setFacetVendors
+          : kind === 'groups'
+            ? setFacetGroups
+            : kind === 'plants'
+              ? setFacetPlants
+              : kind === 'movements'
+                ? setFacetMovements
+                : setFacetMaterials;
+      setter((prev) => (prev.some((x) => x.id === item.id) ? prev : [...prev, item]));
+    },
+    []
+  );
+
+  const searchFacet = useCallback(
+    (kind: 'vendors' | 'groups' | 'materials' | 'plants' | 'movements') =>
+      async (q: string): Promise<OptionItem[]> => {
+        const facets = await fetchMb51Facets(q, activeImportId, {
+          fields: [kind],
+          limit: 200,
+        });
+        const raw =
+          kind === 'vendors'
+            ? facets.vendors
+            : kind === 'groups'
+              ? facets.groups
+              : kind === 'plants'
+                ? facets.plants
+                : kind === 'movements'
+                  ? facets.movements
+                  : facets.materials;
+        return raw.map((x) => ({ id: x.id, text: x.text, lc: x.text.toLowerCase() }));
+      },
+    [activeImportId]
+  );
+
   // Save imported rows to the database (chunked — same store as Aging report)
   const saveRowsToDatabase = useCallback(
     async (
@@ -498,6 +607,7 @@ export default function Mb51TablePageClient() {
         setFacetMaterials(toOpt(facets.materials));
         setFacetPlants(toOpt(facets.plants));
         setFacetMovements(toOpt(facets.movements));
+        if (facets.totals) setFacetTotals(facets.totals);
         setPage(1);
         setLoadMsg(
           `Import has ${meta.rowCount.toLocaleString('en-IN')} rows (${meta.fileName}).`
@@ -560,23 +670,21 @@ export default function Mb51TablePageClient() {
     [initFromRows, saveRowsToDatabase]
   );
 
-  const readWorkbookFile = (file: File): Promise<XLSX.WorkBook> =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
-      reader.onload = (event) => {
-        try {
-          const result = event.target?.result;
-          if (!(result instanceof ArrayBuffer)) {
-            throw new Error('The selected file could not be read.');
-          }
-          resolve(XLSX.read(result, { type: 'array', cellDates: true, raw: true }));
-        } catch (err) {
-          reject(err);
-        }
-      };
-      reader.readAsArrayBuffer(file);
-    });
+  const applyParsedUpload = useCallback(
+    async (fileName: string, parsed: Awaited<ReturnType<typeof parseMb51Upload>>) => {
+      if (!parsed.rows.length) {
+        setLoadMsg(formatMb51ParseFailure(parsed));
+        setIsErrMsg(true);
+        return null;
+      }
+      setAvailableSheets([]);
+      setSelectedSheets(new Set());
+      setWbInstance(null);
+      initFromRows(parsed.rows as MovementRow[]);
+      return saveRowsToDatabase(fileName, parsed.rows as MovementRow[]);
+    },
+    [initFromRows, saveRowsToDatabase]
+  );
 
   /** Several files at once: each becomes its own import (or all append when checkbox is on). */
   const importManyFiles = useCallback(
@@ -595,9 +703,12 @@ export default function Mb51TablePageClient() {
           const file = files[i];
           setWorkbookFileName(file.name);
           setLoadMsg(`Reading ${i + 1}/${files.length}: ${file.name}…`);
-          const workbook = await readWorkbookFile(file);
-          // Any readable sheet — do not care what the tab is named.
-          const parsed = parseMb51Workbook(workbook);
+          const buf = await file.arrayBuffer();
+          const parsed = await parseMb51Upload(buf, {
+            fileName: file.name,
+            fileSize: file.size,
+            onProgress: (m) => setLoadMsg(`${i + 1}/${files.length}: ${m}`),
+          });
           if (!parsed.rows.length) {
             errors.push(`${file.name}: ${formatMb51ParseFailure(parsed)}`);
             continue;
@@ -645,36 +756,70 @@ export default function Mb51TablePageClient() {
     setAvailableSheets([]);
     setSelectedSheets(new Set());
 
-    void readWorkbookFile(file)
-      .then((workbook) => {
-        setWbInstance(workbook);
-        const names = listLoadedSheetNames(workbook);
-        if (names.length === 1) {
-          processSheets(workbook, names, file.name);
-        } else if (names.length > 1) {
-          const list: SheetOption[] = names.map((sheetName) => {
-            const worksheet = workbook.Sheets[sheetName];
-            const range = worksheet?.['!ref'] ? XLSX.utils.decode_range(worksheet['!ref']) : null;
-            return { name: sheetName, rowCount: range ? Math.max(0, range.e.r) : 0 };
-          });
-          setAvailableSheets(list);
-          const defaultSelection = new Set<string>();
-          const largest = list.find((sheet) => sheet.rowCount > 5);
-          if (largest) defaultSelection.add(largest.name);
-          else if (list[0]) defaultSelection.add(list[0].name);
-          setSelectedSheets(defaultSelection);
-          setLoadMsg(`Workbook contains ${list.length} sheets. Choose which ones to load:`);
-        } else {
-          setLoadMsg('The selected workbook has no readable worksheets.');
-          setIsErrMsg(true);
+    const lower = file.name.toLowerCase();
+    const hugeOoxml =
+      (lower.endsWith('.xlsx') || lower.endsWith('.xlsm')) &&
+      file.size >= MB51_XLSX_ZIP_FALLBACK_BYTES;
+
+    void (async () => {
+      const buf = await file.arrayBuffer();
+      if (hugeOoxml) {
+        setLoading(true);
+        try {
+          const parsed = await parseMb51XlsxZip(buf, { onProgress: setLoadMsg });
+          await applyParsedUpload(file.name, parsed);
+        } finally {
+          setLoading(false);
         }
-      })
-      .catch((error: unknown) => {
-        console.error(error);
-        const message = error instanceof Error ? error.message : 'Failed to parse file';
-        setLoadMsg(`Failed to parse: ${message}`);
-        setIsErrMsg(true);
+        return;
+      }
+
+      const workbook = XLSX.read(new Uint8Array(buf), {
+        type: 'array',
+        cellDates: true,
+        raw: true,
       });
+      setWbInstance(workbook);
+      const names = listLoadedSheetNames(workbook);
+      if (names.length === 1) {
+        processSheets(workbook, names, file.name);
+        return;
+      }
+      if (names.length > 1) {
+        const list: SheetOption[] = names.map((sheetName) => {
+          const worksheet = workbook.Sheets[sheetName];
+          const range = worksheet?.['!ref'] ? XLSX.utils.decode_range(worksheet['!ref']) : null;
+          return { name: sheetName, rowCount: range ? Math.max(0, range.e.r) : 0 };
+        });
+        setAvailableSheets(list);
+        const defaultSelection = new Set<string>();
+        const largest = list.find((sheet) => sheet.rowCount > 5);
+        if (largest) defaultSelection.add(largest.name);
+        else if (list[0]) defaultSelection.add(list[0].name);
+        setSelectedSheets(defaultSelection);
+        setLoadMsg(`Workbook contains ${list.length} sheets. Choose which ones to load:`);
+        return;
+      }
+
+      // Ghost tabs / SheetJS empty — stream zip (or CSV already failed above)
+      setLoading(true);
+      try {
+        const parsed = await parseMb51Upload(buf, {
+          fileName: file.name,
+          fileSize: file.size,
+          onProgress: setLoadMsg,
+        });
+        await applyParsedUpload(file.name, parsed);
+      } finally {
+        setLoading(false);
+      }
+    })().catch((error: unknown) => {
+      console.error(error);
+      const message = error instanceof Error ? error.message : 'Failed to parse file';
+      setLoadMsg(`Failed to parse: ${message}`);
+      setIsErrMsg(true);
+      setLoading(false);
+    });
   };
 
   const handleFiles = (list: FileList | File[] | null) => {
@@ -740,7 +885,7 @@ export default function Mb51TablePageClient() {
       [],
       [
         'Seq #', 'Posting Date', 'Plant', 'Material Document', 'Movement Type', 'Movement Text', 'Text',
-        'Material Code', 'Material Description', 'Material Group', 'Quantity', 'UoM', 'Vendor Code', 'Vendor Name',
+        'Material Code', 'Material Description', 'Material Group', 'Quantity', 'UoM', 'Vendor Code', 'SAP Vendor Name',
       ],
     ];
 
@@ -918,28 +1063,63 @@ export default function Mb51TablePageClient() {
                 </div>
                 <div className="f">
                   <label>Vendor code - Vendor name</label>
-                  <MultiSelectDropdown label="vendors" items={vendorOptions} selected={selectedVendors}
-                    onChange={(selection) => { setSelectedVendors(selection); setPage(1); }} />
+                  <MultiSelectDropdown
+                    label="vendors"
+                    items={vendorOptions}
+                    selected={selectedVendors}
+                    totalCount={facetTotals.vendors}
+                    loadOptions={searchFacet('vendors')}
+                    onDiscover={(item) => discoverFacet('vendors', item)}
+                    onChange={(selection) => { setSelectedVendors(selection); setPage(1); }}
+                  />
                 </div>
                 <div className="f">
                   <label>Material group</label>
-                  <MultiSelectDropdown label="groups" items={groupOptions} selected={selectedGroups}
-                    onChange={(selection) => { setSelectedGroups(selection); setPage(1); }} />
+                  <MultiSelectDropdown
+                    label="groups"
+                    items={groupOptions}
+                    selected={selectedGroups}
+                    totalCount={facetTotals.groups}
+                    loadOptions={searchFacet('groups')}
+                    onDiscover={(item) => discoverFacet('groups', item)}
+                    onChange={(selection) => { setSelectedGroups(selection); setPage(1); }}
+                  />
                 </div>
                 <div className="f">
                   <label>Material code - description</label>
-                  <MultiSelectDropdown label="materials" items={matOptions} selected={selectedMaterials}
-                    onChange={(selection) => { setSelectedMaterials(selection); setPage(1); }} />
+                  <MultiSelectDropdown
+                    label="materials"
+                    items={matOptions}
+                    selected={selectedMaterials}
+                    totalCount={facetTotals.materials}
+                    loadOptions={searchFacet('materials')}
+                    onDiscover={(item) => discoverFacet('materials', item)}
+                    onChange={(selection) => { setSelectedMaterials(selection); setPage(1); }}
+                  />
                 </div>
                 <div className="f">
                   <label>Plant</label>
-                  <MultiSelectDropdown label="plants" items={plantOptions} selected={selectedPlants}
-                    onChange={(selection) => { setSelectedPlants(selection); setPage(1); }} />
+                  <MultiSelectDropdown
+                    label="plants"
+                    items={plantOptions}
+                    selected={selectedPlants}
+                    totalCount={facetTotals.plants}
+                    loadOptions={searchFacet('plants')}
+                    onDiscover={(item) => discoverFacet('plants', item)}
+                    onChange={(selection) => { setSelectedPlants(selection); setPage(1); }}
+                  />
                 </div>
                 <div className="f">
                   <label>Movement type</label>
-                  <MultiSelectDropdown label="movement types" items={movOptions} selected={selectedMovements}
-                    onChange={(selection) => { setSelectedMovements(selection); setPage(1); }} />
+                  <MultiSelectDropdown
+                    label="movement types"
+                    items={movOptions}
+                    selected={selectedMovements}
+                    totalCount={facetTotals.movements}
+                    loadOptions={searchFacet('movements')}
+                    onDiscover={(item) => discoverFacet('movements', item)}
+                    onChange={(selection) => { setSelectedMovements(selection); setPage(1); }}
+                  />
                 </div>
                 <div className="f">
                   <label htmlFor="table-search">Search in table</label>
@@ -1014,7 +1194,7 @@ export default function Mb51TablePageClient() {
                       <th className="n" onClick={() => handleSort('q')}>Quantity {sortArrow('q')}</th>
                       <th>UoM</th>
                       <th onClick={() => handleSort('v')}>Vendor {sortArrow('v')}</th>
-                      <th onClick={() => handleSort('vn')}>Vendor Name {sortArrow('vn')}</th>
+                      <th onClick={() => handleSort('vn')}>SAP Vendor Name {sortArrow('vn')}</th>
                     </tr>
                   </thead>
                   <tbody>

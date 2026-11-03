@@ -13,6 +13,11 @@ export async function GET(req: NextRequest) {
     if (!auth.ok) return auth.response;
     const sp = req.nextUrl.searchParams;
     const sortDirRaw = Number(sp.get('sortDir') || -1);
+    const csv = (key: string) =>
+      (sp.get(key) || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
     return NextResponse.json(
       await fetchMb51AggPage({
         paramHash: sp.get('paramHash')?.trim() || DEFAULT_PARAM_HASH,
@@ -22,6 +27,10 @@ export async function GET(req: NextRequest) {
         q: sp.get('q') || '',
         sort: sp.get('sort') || 'total',
         sortDir: sortDirRaw >= 0 ? 1 : -1,
+        vendors: csv('vendors'),
+        groups: csv('groups'),
+        materials: csv('materials'),
+        withSummary: sp.get('withSummary') === '1',
       })
     );
   } catch (err) {

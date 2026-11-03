@@ -14,6 +14,10 @@ assert.equal(normHeader('Amt.in Loc.Cur.'), 'amtinloccur');
 assert.equal(normHeader('Material Doc. Year'), 'materialdocyear');
 assert.equal(normHeader('Base Unit of Measure'), 'baseunitofmeasure');
 assert.equal(normHeader('Qty in unit of entry'), 'qtyinunitofentry');
+// SAP shared-string style (&#x20; = space) — MB51_02/03/04
+assert.equal(normHeader('Posting&#x20;Date'), 'postingdate');
+assert.equal(normHeader('Qty&#x20;in&#x20;unit&#x20;of&#x20;entry'), 'qtyinunitofentry');
+assert.equal(normHeader('Material&#x20;Document'), 'materialdocument');
 
 assert.equal(toPostingSerial('01.04.2025'), toPostingSerial('2025-04-01'));
 assert.equal(parseQty('1,234.5'), 1234.5);

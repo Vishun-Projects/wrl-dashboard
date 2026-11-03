@@ -6,7 +6,7 @@ export type Mb51AgingMovement = {
   g: string;      // Material group
   u: string;      // Unit of measure
   v: string;      // Vendor / supplier code
-  vn: string;     // Vendor / supplier name
+  vn: string;     // SAP Vendor Name (from SAP Vendor Master when code matches)
   mv: string;     // Plant
   s: number;      // Sequence order
   dc?: string;    // Material document

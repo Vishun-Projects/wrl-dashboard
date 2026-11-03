@@ -34,6 +34,7 @@ import {
   Table,
   PackageSearch,
   LayoutDashboard,
+  BookUser,
 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -162,6 +163,8 @@ export function Sidebar({ user }: SidebarProps) {
                       ? Hourglass
                     : path === '/report/mb51-table'
                       ? Table
+                  : path === '/admin/vendor-master'
+                    ? BookUser
                   : path === '/admin/users'
                   ? Users
                   : path === '/admin/roles'

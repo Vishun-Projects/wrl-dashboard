@@ -4,8 +4,20 @@ import type { Mb51AgingMovement } from '@/modules/mb51-aging/types';
 const DAY = 86400000;
 const EPOCH_OFFSET = 25569;
 
+/** Decode &#x20; / &#32; / &amp; so SAP shared-string headers still normalize. */
+function decodeHeaderEntities(s: string): string {
+  return s
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h: string) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&#([0-9]+);/g, (_, d: string) => String.fromCharCode(Number(d)))
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
+
 export const normHeader = (s: unknown) =>
-  String(s == null ? '' : s)
+  decodeHeaderEntities(String(s == null ? '' : s))
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
 

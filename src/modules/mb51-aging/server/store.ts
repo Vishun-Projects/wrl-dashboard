@@ -4,11 +4,33 @@ import {
   mb51MovementDedupeKey,
 } from '@/modules/mb51-aging/dedupe';
 import { buildDefaultSnapshot } from '@/modules/mb51-aging/server/fifo-from-db';
+import {
+  enrichMb51VendorNames,
+  loadSapVendorNameMap,
+  normVendorCode,
+} from '@/modules/mb51-aging/server/vendor-master';
 import type {
   Mb51AgingImportMeta,
   Mb51AgingMovement,
 } from '@/modules/mb51-aging/types';
 import type { PoolClient } from 'pg';
+
+async function withSapVendorNames(
+  client: PoolClient,
+  rows: Mb51AgingMovement[]
+): Promise<Mb51AgingMovement[]> {
+  if (!rows.length) return rows;
+  const codes = rows.map((r) => normVendorCode(r.v)).filter(Boolean);
+  if (!codes.length) return rows;
+  try {
+    const map = await loadSapVendorNameMap(client, codes);
+    return enrichMb51VendorNames(rows, map);
+  } catch (err) {
+    // Table may not exist yet on older DBs — keep export names.
+    console.warn('[mb51-aging] SAP vendor master lookup skipped', err);
+    return rows;
+  }
+}
 
 const BATCH_SIZE = 2_500;
 const DAY = 86400000;
@@ -174,6 +196,18 @@ async function insertRowBatch(
           item_text,
           seq_order
         ) VALUES ${placeholders.join(',')}
+        ON CONFLICT (
+          import_id,
+          material_document,
+          plant,
+          material,
+          movement_type,
+          posting_date_serial,
+          qty,
+          vendor,
+          uom,
+          item_text
+        ) DO NOTHING
         `,
         values
       );
@@ -415,7 +449,10 @@ export async function saveMb51AgingImport(opts: {
           if (!exists.rows[0]) {
             throw new Error(`MB51 import ${existingImportId} not found for append`);
           }
-          const fresh = await filterNewRowsForImport(client, existingImportId, rows);
+          const fresh = await withSapVendorNames(
+            client,
+            await filterNewRowsForImport(client, existingImportId, rows)
+          );
           if (fresh.length) {
             // Use client seqOffset so parallel chunks don't collide on seq_order.
             await insertRowBatch(client, existingImportId, fresh, seqOffset);
@@ -458,7 +495,8 @@ export async function saveMb51AgingImport(opts: {
           await client.query('DELETE FROM mb51_aging_imports');
         }
 
-        const { rows: uniqueRows } = dedupeMb51Movements(rows);
+        const { rows: deduped } = dedupeMb51Movements(rows);
+        const uniqueRows = await withSapVendorNames(client, deduped);
         const plantCount = new Set(uniqueRows.map((r) => r.mv).filter(Boolean)).size;
         const materialCount = new Set(uniqueRows.map((r) => r.m).filter(Boolean)).size;
 

@@ -69,12 +69,17 @@ export async function fetchMb51AggPage(opts: {
   q?: string;
   sort?: string;
   sortDir?: number;
+  vendors?: string[];
+  groups?: string[];
+  materials?: string[];
+  withSummary?: boolean;
 }): Promise<{
   rows: Mb51AgingThinRow[];
   total: number;
   page: number;
   pageSize: number;
   paramHash: string;
+  summary?: Mb51AgingSummary;
 }> {
   const sp = new URLSearchParams();
   sp.set('paramHash', opts.paramHash || 'default');
@@ -84,6 +89,10 @@ export async function fetchMb51AggPage(opts: {
   if (opts.q) sp.set('q', opts.q);
   if (opts.sort) sp.set('sort', opts.sort);
   if (opts.sortDir != null) sp.set('sortDir', String(opts.sortDir));
+  if (opts.vendors?.length) sp.set('vendors', opts.vendors.join(','));
+  if (opts.groups?.length) sp.set('groups', opts.groups.join(','));
+  if (opts.materials?.length) sp.set('materials', opts.materials.join(','));
+  if (opts.withSummary) sp.set('withSummary', '1');
   return getJson(`/api/report/mb51-aging/agg?${sp}`);
 }
 
@@ -117,7 +126,11 @@ export async function postMb51Detail(opts: {
 
 export async function fetchMb51Facets(
   q = '',
-  importId?: string | null
+  importId?: string | null,
+  opts?: {
+    fields?: Array<'plants' | 'vendors' | 'groups' | 'materials' | 'movements'>;
+    limit?: number;
+  }
 ): Promise<{
   plants: { id: string; text: string }[];
   vendors: { id: string; text: string }[];
@@ -134,7 +147,8 @@ export async function fetchMb51Facets(
 }> {
   const sp = new URLSearchParams();
   if (q) sp.set('q', q);
-  sp.set('limit', '2000');
+  sp.set('limit', String(opts?.limit ?? (q ? 200 : 2000)));
+  if (opts?.fields?.length) sp.set('fields', opts.fields.join(','));
   withImport(sp, importId);
   return getJson(`/api/report/mb51-aging/facets?${sp}`);
 }

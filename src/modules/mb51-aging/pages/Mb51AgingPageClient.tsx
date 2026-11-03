@@ -8,6 +8,7 @@ import type {
   Mb51AgingImportMeta,
   Mb51AgingAggRow,
   Mb51AgingResult,
+  Mb51AgingReportParams,
   Mb51AgingSummary,
   Mb51AgingThinRow,
 } from '@/modules/mb51-aging/types';
@@ -19,6 +20,7 @@ import {
   postMb51Detail,
   postMb51Report,
 } from '@/modules/mb51-aging/api-client';
+import { canPostFilterMb51Agg } from '@/modules/mb51-aging/can-post-filter';
 import { saveMb51AgingRows } from '@/modules/mb51-aging/save-client';
 import {
   downloadMb51TemplateCsv,
@@ -26,6 +28,11 @@ import {
   listLoadedSheetNames,
   parseMb51Workbook,
 } from '@/modules/mb51-aging/parse-workbook';
+import {
+  MB51_XLSX_ZIP_FALLBACK_BYTES,
+  parseMb51Upload,
+  parseMb51XlsxZip,
+} from '@/modules/mb51-aging/parse-xlsx-zip';
 import {
   BUCKETS,
   DEFAULT_DEFECTIVE_MATERIALS,
@@ -123,6 +130,8 @@ function MultiSelectDropdown({
   emptyText,
   selectedOnlyLabel = 'Selected only',
   totalCount,
+  loadOptions,
+  onDiscover,
 }: {
   label: string;
   items: OptionItem[];
@@ -134,11 +143,20 @@ function MultiSelectDropdown({
   selectedOnlyLabel?: string;
   /** True DISTINCT total — list may be capped so do not use items.length. */
   totalCount?: number;
+  /** Server search beyond the capped local list. */
+  loadOptions?: (q: string) => Promise<OptionItem[]>;
+  /** Keep remote picks in parent facet state so labels survive close. */
+  onDiscover?: (item: OptionItem) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [selectedOnly, setSelectedOnly] = useState(false);
+  const [remote, setRemote] = useState<OptionItem[] | null>(null);
+  const [searching, setSearching] = useState(false);
   const popRef = useRef<HTMLDivElement>(null);
+  const searchGen = useRef(0);
+  const loadRef = useRef(loadOptions);
+  loadRef.current = loadOptions;
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -157,12 +175,52 @@ function MultiSelectDropdown({
     if (selectedOnly && selected.size === 0) setSelectedOnly(false);
   }, [selected, selectedOnly]);
 
+  // Debounced server search when typing past the 2000-cap local list
+  useEffect(() => {
+    if (!loadRef.current || selectedOnly) {
+      setRemote(null);
+      setSearching(false);
+      return;
+    }
+    const q = query.trim();
+    if (!q) {
+      setRemote(null);
+      setSearching(false);
+      return;
+    }
+    const gen = ++searchGen.current;
+    setSearching(true);
+    const t = window.setTimeout(() => {
+      void loadRef
+        .current?.(q)
+        .then((hits) => {
+          if (gen !== searchGen.current) return;
+          setRemote(hits);
+        })
+        .catch(() => {
+          if (gen !== searchGen.current) return;
+          setRemote([]);
+        })
+        .finally(() => {
+          if (gen === searchGen.current) setSearching(false);
+        });
+    }, 280);
+    return () => window.clearTimeout(t);
+  }, [query, selectedOnly]);
+
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let list = items;
-    if (selectedOnly) list = list.filter((i) => selected.has(i.id));
-    return q ? list.filter((i) => i.lc.includes(q)) : list;
-  }, [items, query, selectedOnly, selected]);
+    if (selectedOnly) {
+      const pool = [...items, ...(remote ?? [])];
+      const byId = new Map(pool.map((i) => [i.id, i]));
+      return [...selected]
+        .map((id) => byId.get(id) ?? { id, text: id, lc: id.toLowerCase() })
+        .filter((i) => !q || i.lc.includes(q));
+    }
+    if (remote) return remote;
+    if (!q) return items;
+    return items.filter((i) => i.lc.includes(q));
+  }, [items, query, selectedOnly, selected, remote]);
 
   const lim = 400;
   const part = shown.slice(0, lim);
@@ -172,11 +230,13 @@ function MultiSelectDropdown({
     const allN = totalCount ?? items.length;
     if (n === 0) return emptyText ?? `All ${label} (${allN.toLocaleString('en-IN')})`;
     if (n === 1) {
-      const match = items.find((i) => selected.has(i.id));
+      const match =
+        items.find((i) => selected.has(i.id)) ??
+        remote?.find((i) => selected.has(i.id));
       return match ? match.text : '1 selected';
     }
     return `${n} selected`;
-  }, [selected, label, items, emptyText, totalCount]);
+  }, [selected, label, items, emptyText, totalCount, remote]);
 
   return (
     <div className={`ms ${open ? 'open' : ''}`} ref={popRef}>
@@ -212,7 +272,10 @@ function MultiSelectDropdown({
               type="button"
               onClick={() => {
                 const next = new Set(selected);
-                shown.forEach((i) => next.add(i.id));
+                shown.forEach((i) => {
+                  next.add(i.id);
+                  onDiscover?.(i);
+                });
                 onChange(next);
               }}
             >
@@ -231,8 +294,10 @@ function MultiSelectDropdown({
                     checked={selected.has(i.id)}
                     onChange={(e) => {
                       const next = new Set(selected);
-                      if (e.target.checked) next.add(i.id);
-                      else next.delete(i.id);
+                      if (e.target.checked) {
+                        next.add(i.id);
+                        onDiscover?.(i);
+                      } else next.delete(i.id);
                       onChange(next);
                     }}
                   />
@@ -241,14 +306,20 @@ function MultiSelectDropdown({
               ))
             ) : (
               <div className="empty">
-                {selectedOnly ? 'No excluded materials' : 'No match'}
+                {searching
+                  ? 'Searching…'
+                  : selectedOnly
+                    ? 'No excluded materials'
+                    : 'No match'}
               </div>
             )}
           </div>
           <div className="ms-foot">
             {selectedOnly
               ? `${shown.length} excluded`
-              : `${shown.length} of ${items.length} shown`}
+              : remote
+                ? `${shown.length} match${shown.length === 1 ? '' : 'es'}${searching ? '…' : ''}`
+                : `${shown.length} of ${(totalCount ?? items.length).toLocaleString('en-IN')} shown`}
             {shown.length > lim ? ` (first ${lim} – refine search)` : ''}
           </div>
         </div>
@@ -358,6 +429,14 @@ export default function Mb51AgingPageClient() {
   const [page, setPage] = useState(1);
   const [pageLoading, setPageLoading] = useState(false);
   const [paramHash, setParamHash] = useState('default');
+  /** Params baked into the loaded snapshot (for filter-vs-recompute decide). */
+  const [snapshotParams, setSnapshotParams] = useState<Mb51AgingReportParams | null>(null);
+  /** Dim filters applied on top of the current snapshot (no FIFO). */
+  const [aggFilters, setAggFilters] = useState<{
+    vendors: string[];
+    groups: string[];
+    materials: string[];
+  }>({ vendors: [], groups: [], materials: [] });
   const [aggTotal, setAggTotal] = useState(0);
   const [summary, setSummary] = useState<Mb51AgingSummary | null>(null);
   const [thinRows, setThinRows] = useState<Mb51AgingThinRow[]>([]);
@@ -397,8 +476,23 @@ export default function Mb51AgingPageClient() {
     writeStoredImportId(id);
   }, []);
 
+  const aggFiltersRef = useRef(aggFilters);
+  aggFiltersRef.current = aggFilters;
+  /** When Generate already loaded page 1, skip the effect's immediate re-fetch. */
+  const skipAggEffectRef = useRef(false);
+
   const loadAggPage = useCallback(
-    async (hash: string, pageNum: number, q: string, sort: string, dir: number, importId?: string | null) => {
+    async (
+      hash: string,
+      pageNum: number,
+      q: string,
+      sort: string,
+      dir: number,
+      importId?: string | null,
+      filters?: { vendors: string[]; groups: string[]; materials: string[] },
+      withSummary = false
+    ) => {
+      const f = filters ?? aggFiltersRef.current;
       const agg = await fetchMb51AggPage({
         paramHash: hash,
         importId: importId ?? activeImportId,
@@ -407,11 +501,52 @@ export default function Mb51AgingPageClient() {
         q,
         sort: sort || 'total',
         sortDir: dir,
+        vendors: f.vendors,
+        groups: f.groups,
+        materials: f.materials,
+        withSummary,
       });
       setThinRows(agg.rows);
       setAggTotal(agg.total);
-      setPage(agg.page);
+      // Don't setPage here — caller/effect owns page; setting it retriggers loads.
+      if (agg.summary) setSummary(agg.summary);
+      return agg;
     },
+    [activeImportId]
+  );
+
+  const discoverFacet = useCallback(
+    (kind: 'vendors' | 'groups' | 'materials' | 'plants', item: OptionItem) => {
+      const setter =
+        kind === 'vendors'
+          ? setFacetVendors
+          : kind === 'groups'
+            ? setFacetGroups
+            : kind === 'plants'
+              ? setFacetPlants
+              : setFacetMaterials;
+      setter((prev) => (prev.some((x) => x.id === item.id) ? prev : [...prev, item]));
+    },
+    []
+  );
+
+  const searchFacet = useCallback(
+    (kind: 'vendors' | 'groups' | 'materials' | 'plants') =>
+      async (q: string): Promise<OptionItem[]> => {
+        const facets = await fetchMb51Facets(q, activeImportId, {
+          fields: [kind],
+          limit: 200,
+        });
+        const raw =
+          kind === 'vendors'
+            ? facets.vendors
+            : kind === 'groups'
+              ? facets.groups
+              : kind === 'plants'
+                ? facets.plants
+                : facets.materials;
+        return raw.map((x) => ({ id: x.id, text: x.text, lc: x.text.toLowerCase() }));
+      },
     [activeImportId]
   );
 
@@ -486,6 +621,8 @@ export default function Mb51AgingPageClient() {
 
       setParamHash(sumRes.summary.paramHash);
       setSummary(sumRes.summary);
+      setSnapshotParams(sumRes.params);
+      setAggFilters({ vendors: [], groups: [], materials: [] });
       setGroupBy(sumRes.summary.gb);
       // Sync date pickers to the snapshot that produced these KPIs
       if (sumRes.params) {
@@ -552,7 +689,7 @@ export default function Mb51AgingPageClient() {
     [facetMaterials, excludedMaterials]
   );
 
-  // Rebuild snapshot on Generate (server FIFO), then paint KPIs + page 1
+  // Generate: filter existing snapshot when possible; FIFO only when params need it
   const handleRun = useCallback(async () => {
     if (!basisDate) {
       alert('Please select an aging basis date.');
@@ -563,27 +700,71 @@ export default function Mb51AgingPageClient() {
       alert('Please select an aging basis date.');
       return;
     }
+    const nextParams: Mb51AgingReportParams = {
+      basis,
+      from: dateToSerial(dateFrom) ?? -1e9,
+      to: dateToSerial(dateTo) ?? 1e9,
+      groupBy,
+      plants: [...selectedPlants],
+      vendors: [...selectedVendors],
+      groups: [...selectedGroups],
+      materials: [...selectedMaterials],
+      excludedMaterials: [...excludedMaterials],
+    };
     try {
       setLoading(true);
-      setLoadMsg('Computing aging…');
       setIsErrMsg(false);
-      const rebuilt = await postMb51Report(
-        {
-          basis,
-          from: dateToSerial(dateFrom) ?? -1e9,
-          to: dateToSerial(dateTo) ?? 1e9,
-          groupBy,
-          plants: [...selectedPlants],
-          vendors: [...selectedVendors],
-          groups: [...selectedGroups],
-          materials: [...selectedMaterials],
-          excludedMaterials: [...excludedMaterials],
-        },
-        activeImportId
-      );
+
+      // Fast path: same FIFO basis as loaded snapshot → filter agg rows only
+      if (snapshotParams && canPostFilterMb51Agg(snapshotParams, nextParams)) {
+        setLoadMsg('Filtering…');
+        const filters = {
+          vendors: nextParams.vendors,
+          groups: nextParams.groups,
+          materials: nextParams.materials,
+        };
+        const hasDim =
+          filters.vendors.length + filters.groups.length + filters.materials.length > 0;
+        if (!hasDim) {
+          // No dim filters — restore baked snapshot KPIs (don't zero neg/plug via rollup).
+          const sumRes = await fetchMb51Summary(paramHash, activeImportId);
+          if (sumRes.summary) setSummary(sumRes.summary);
+        }
+        skipAggEffectRef.current = true;
+        setAggFilters(filters);
+        setPage(1);
+        await loadAggPage(
+          paramHash,
+          1,
+          searchQuery,
+          sortKey || 'total',
+          sortDir,
+          activeImportId,
+          filters,
+          hasDim
+        );
+        setLoadMsg('');
+        setShowUpload(false);
+        return;
+      }
+
+      setLoadMsg('Computing aging…');
+      const rebuilt = await postMb51Report(nextParams, activeImportId);
+      skipAggEffectRef.current = true;
       setParamHash(rebuilt.paramHash);
       setSummary(rebuilt.summary);
-      await loadAggPage(rebuilt.paramHash, 1, searchQuery, sortKey || 'total', sortDir, activeImportId);
+      setSnapshotParams(nextParams);
+      setAggFilters({ vendors: [], groups: [], materials: [] });
+      setPage(1);
+      await loadAggPage(
+        rebuilt.paramHash,
+        1,
+        searchQuery,
+        sortKey || 'total',
+        sortDir,
+        activeImportId,
+        { vendors: [], groups: [], materials: [] }
+      );
       setLoadMsg('');
       setShowUpload(false);
     } catch (err: unknown) {
@@ -608,6 +789,8 @@ export default function Mb51AgingPageClient() {
     sortDir,
     loadAggPage,
     activeImportId,
+    snapshotParams,
+    paramHash,
   ]);
 
   const applyUomInfo = useCallback(
@@ -727,28 +910,6 @@ export default function Mb51AgingPageClient() {
     [applyUomInfo, saveRowsToDatabase]
   );
 
-  const readWorkbookFile = (f: File): Promise<XLSX.WorkBook> =>
-    new Promise((resolve, reject) => {
-      const fr = new FileReader();
-      fr.onerror = () => reject(new Error(`Could not read ${f.name}`));
-      fr.onload = () => {
-        try {
-          // Avoid dense:true — some SAP exports list sheet names (e.g. "MB51")
-          // that then aren't present on wb.Sheets under dense mode.
-          resolve(
-            XLSX.read(new Uint8Array(fr.result as ArrayBuffer), {
-              type: 'array',
-              cellDates: true,
-              raw: true,
-            })
-          );
-        } catch (err) {
-          reject(err);
-        }
-      };
-      fr.readAsArrayBuffer(f);
-    });
-
   /** Several files at once: each becomes its own import (or all append when checkbox is on). */
   const importManyFiles = useCallback(
     async (files: File[]) => {
@@ -764,16 +925,19 @@ export default function Mb51AgingPageClient() {
         for (let i = 0; i < files.length; i++) {
           const f = files[i];
           setLoadMsg(`Reading ${i + 1}/${files.length}: ${f.name}…`);
-          const wb = await readWorkbookFile(f);
-          // Any readable sheet — do not care what the tab is named.
-          const parsed = parseMb51Workbook(wb);
+          const buf = await f.arrayBuffer();
+          const parsed = await parseMb51Upload(buf, {
+            fileName: f.name,
+            fileSize: f.size,
+            onProgress: (m) => setLoadMsg(`${i + 1}/${files.length}: ${m}`),
+          });
           if (!parsed.rows.length) {
             errors.push(`${f.name}: ${formatMb51ParseFailure(parsed)}`);
             continue;
           }
           applyUomInfo(
             parsed.rows,
-            listLoadedSheetNames(wb),
+            [f.name],
             parsed.qtyCol,
             parsed.uomCol,
             parsed.uomSeen
@@ -818,35 +982,89 @@ export default function Mb51AgingPageClient() {
     setIsErrMsg(false);
     setAvailableSheets([]);
 
-    void readWorkbookFile(f)
-      .then((wb) => {
-        setWbInstance(wb);
-        const names = listLoadedSheetNames(wb);
-        if (names.length > 1) {
-          const list = names.map((n) => {
-            const ws = wb.Sheets[n] as unknown as { '!data'?: unknown[] } | unknown[];
-            const rowCount = Array.isArray(ws)
-              ? ws.length
-              : ws?.['!data']
-                ? ws['!data'].length
-                : 0;
-            return { name: n, rowCount };
-          });
-          setAvailableSheets(list);
-          setSelectedSheets(new Set(names));
-          setLoadMsg(
-            `Workbook has ${names.length} sheets – tick the sheets that hold movement data, then click Load.`
-          );
-        } else {
-          processSheets(wb, names, f.name);
+    const lower = f.name.toLowerCase();
+    const hugeOoxml =
+      (lower.endsWith('.xlsx') || lower.endsWith('.xlsm')) &&
+      f.size >= MB51_XLSX_ZIP_FALLBACK_BYTES;
+
+    void (async () => {
+      const buf = await f.arrayBuffer();
+      if (hugeOoxml) {
+        setLoading(true);
+        try {
+          const parsed = await parseMb51XlsxZip(buf, { onProgress: setLoadMsg });
+          if (!parsed.rows.length) {
+            setLoadMsg(formatMb51ParseFailure(parsed));
+            setIsErrMsg(true);
+            return;
+          }
+          applyUomInfo(parsed.rows, [f.name], parsed.qtyCol, parsed.uomCol, parsed.uomSeen);
+          setAvailableSheets([]);
+          setWbInstance(null);
+          await saveRowsToDatabase(f.name, parsed.rows);
+          setShowUpload(false);
+        } finally {
+          setLoading(false);
         }
-      })
-      .catch((err: unknown) => {
-        console.error(err);
-        const msg = err instanceof Error ? err.message : 'Failed to parse file';
-        setLoadMsg(`Failed to parse: ${msg}`);
-        setIsErrMsg(true);
+        return;
+      }
+
+      const wb = XLSX.read(new Uint8Array(buf), {
+        type: 'array',
+        cellDates: true,
+        raw: true,
       });
+      setWbInstance(wb);
+      const names = listLoadedSheetNames(wb);
+      if (names.length > 1) {
+        const list = names.map((n) => {
+          const ws = wb.Sheets[n] as unknown as { '!data'?: unknown[] } | unknown[];
+          const rowCount = Array.isArray(ws)
+            ? ws.length
+            : ws?.['!data']
+              ? ws['!data'].length
+              : 0;
+          return { name: n, rowCount };
+        });
+        setAvailableSheets(list);
+        setSelectedSheets(new Set(names));
+        setLoadMsg(
+          `Workbook has ${names.length} sheets – tick the sheets that hold movement data, then click Load.`
+        );
+        return;
+      }
+      if (names.length === 1) {
+        processSheets(wb, names, f.name);
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const parsed = await parseMb51Upload(buf, {
+          fileName: f.name,
+          fileSize: f.size,
+          onProgress: setLoadMsg,
+        });
+        if (!parsed.rows.length) {
+          setLoadMsg(formatMb51ParseFailure(parsed));
+          setIsErrMsg(true);
+          return;
+        }
+        applyUomInfo(parsed.rows, [f.name], parsed.qtyCol, parsed.uomCol, parsed.uomSeen);
+        setAvailableSheets([]);
+        setWbInstance(null);
+        await saveRowsToDatabase(f.name, parsed.rows);
+        setShowUpload(false);
+      } finally {
+        setLoading(false);
+      }
+    })().catch((err: unknown) => {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : 'Failed to parse file';
+      setLoadMsg(`Failed to parse: ${msg}`);
+      setIsErrMsg(true);
+      setLoading(false);
+    });
   };
 
   const handleFiles = (list: FileList | File[] | null) => {
@@ -896,6 +1114,9 @@ export default function Mb51AgingPageClient() {
         q: searchQuery,
         sort: sortKey || 'total',
         sortDir,
+        vendors: aggFilters.vendors,
+        groups: aggFilters.groups,
+        materials: aggFilters.materials,
       });
       all.push(...chunk.rows);
       if (all.length >= chunk.total || !chunk.rows.length) break;
@@ -947,14 +1168,23 @@ export default function Mb51AgingPageClient() {
     XLSX.writeFile(wb, `MB51_Aging_${serialToISO(R.basis)}.xlsx`);
   };
 
-  // Reset to page 1 when search/sort changes
+  const hasSummary = summary != null;
+  const aggFilterKey = `${aggFilters.vendors.join('\0')}\n${aggFilters.groups.join('\0')}\n${aggFilters.materials.join('\0')}`;
+
+  // Reset to page 1 when search/sort/filters change
   useEffect(() => {
     setPage(1);
-  }, [searchQuery, sortKey, sortDir, paramHash]);
+  }, [searchQuery, sortKey, sortDir, paramHash, aggFilterKey]);
 
-  // Server-paged thin rows (search/sort hit API)
+  // Server-paged thin rows (search/sort hit API).
+  // Depend on hasSummary (boolean), not summary object — filter rollups rewrite
+  // summary and used to retrigger this effect forever.
   useEffect(() => {
-    if (!summary || !paramHash) return;
+    if (!hasSummary || !paramHash) return;
+    if (skipAggEffectRef.current) {
+      skipAggEffectRef.current = false;
+      return;
+    }
     let active = true;
     void (async () => {
       setPageLoading(true);
@@ -963,6 +1193,8 @@ export default function Mb51AgingPageClient() {
       } catch (err) {
         if (!active) return;
         console.error(err);
+        setLoadMsg(err instanceof Error ? err.message : 'Failed to load rows');
+        setIsErrMsg(true);
       } finally {
         if (active) setPageLoading(false);
       }
@@ -970,7 +1202,7 @@ export default function Mb51AgingPageClient() {
     return () => {
       active = false;
     };
-  }, [paramHash, page, searchQuery, sortKey, sortDir, summary, loadAggPage]);
+  }, [paramHash, page, searchQuery, sortKey, sortDir, hasSummary, loadAggPage, aggFilterKey]);
 
   const displayedRows = reportResult?.rows ?? [];
   const shownRows = displayedRows;
@@ -1210,7 +1442,7 @@ export default function Mb51AgingPageClient() {
               <div className="msg">
                 Required: Posting Date, Material, Quantity (or Qty in unit of entry). Optional: Plant,
                 Material Document, Material Description, Material Group, Base Unit of Measure /
-                Unit of Entry, Supplier, Supplier Name, Movement Type, Text. Files merge into the
+                Unit of Entry, Supplier, SAP Vendor Name (from Vendor Master), Movement Type, Text. Files merge into the
                 overall dataset; one FIFO snapshot is rebuilt (duplicates skipped).
               </div>
               <p style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
@@ -1354,6 +1586,8 @@ export default function Mb51AgingPageClient() {
                     selected={selectedVendors}
                     onChange={setSelectedVendors}
                     totalCount={facetTotals.vendors}
+                    loadOptions={searchFacet('vendors')}
+                    onDiscover={(item) => discoverFacet('vendors', item)}
                   />
                 </div>
                 <div className="f">
@@ -1364,6 +1598,8 @@ export default function Mb51AgingPageClient() {
                     selected={selectedGroups}
                     onChange={setSelectedGroups}
                     totalCount={facetTotals.groups}
+                    loadOptions={searchFacet('groups')}
+                    onDiscover={(item) => discoverFacet('groups', item)}
                   />
                 </div>
                 <div className="f">
@@ -1374,6 +1610,12 @@ export default function Mb51AgingPageClient() {
                     selected={selectedMaterials}
                     onChange={setSelectedMaterials}
                     totalCount={facetTotals.materials}
+                    loadOptions={async (q) =>
+                      (await searchFacet('materials')(q)).filter(
+                        (i) => !excludedMaterials.has(i.id)
+                      )
+                    }
+                    onDiscover={(item) => discoverFacet('materials', item)}
                   />
                 </div>
                 <div className="f">
@@ -1385,6 +1627,8 @@ export default function Mb51AgingPageClient() {
                     items={excludeMatOptions}
                     selected={excludedMaterials}
                     totalCount={facetTotals.materials}
+                    loadOptions={searchFacet('materials')}
+                    onDiscover={(item) => discoverFacet('materials', item)}
                     onChange={(next) => {
                       setExcludedMaterials(next);
                       setSelectedMaterials((prev) => {
@@ -1403,6 +1647,8 @@ export default function Mb51AgingPageClient() {
                     selected={selectedPlants}
                     onChange={setSelectedPlants}
                     totalCount={facetTotals.plants}
+                    loadOptions={searchFacet('plants')}
+                    onDiscover={(item) => discoverFacet('plants', item)}
                   />
                 </div>
                 <div className="f">

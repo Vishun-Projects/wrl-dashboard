@@ -228,12 +228,18 @@ export async function fetchMb51AggPage(opts: {
   q?: string;
   sort?: string;
   sortDir?: 1 | -1;
+  vendors?: string[];
+  groups?: string[];
+  materials?: string[];
+  /** When true (or any dim filter set), also roll up KPI totals from matching agg rows. */
+  withSummary?: boolean;
 }): Promise<{
   rows: Mb51AgingThinRow[];
   total: number;
   page: number;
   pageSize: number;
   paramHash: string;
+  summary?: Mb51AgingSummary;
 }> {
   const paramHash = opts.paramHash || DEFAULT_PARAM_HASH;
   const page = Math.max(1, Math.floor(opts.page ?? 1));
@@ -241,6 +247,12 @@ export async function fetchMb51AggPage(opts: {
   const q = (opts.q || '').trim().toLowerCase();
   const sort = opts.sort || 'total';
   const sortDir = opts.sortDir === 1 ? 1 : -1;
+  const vendors = (opts.vendors || []).filter(Boolean);
+  const groups = (opts.groups || []).filter(Boolean);
+  const materials = (opts.materials || []).filter(Boolean);
+  // Only when asked — auto-rollup on every paged fetch rewrote summary and
+  // retriggered the client page effect in a loop.
+  const wantSummary = !!opts.withSummary;
 
   return withAppClient(
     async (client) => {
@@ -274,36 +286,50 @@ export async function fetchMb51AggPage(opts: {
                         ? `bk[${Number(sort[1])}]`
                         : 'total';
 
-      const where = q
-        ? `AND (
-            lower(vendor) LIKE $3 OR lower(vendor_name) LIKE $3 OR
-            lower(material) LIKE $3 OR lower(material_description) LIKE $3 OR
-            lower(material_group) LIKE $3 OR lower(uom) LIKE $3 OR
-            lower(group_key) LIKE $3
-          )`
-        : '';
-      const like = q ? `%${q}%` : null;
-      const countParams = like
-        ? [snap.snapshotId, like]
-        : [snap.snapshotId];
+      // $1 = snapshot_id; optional dim filters + q packed after
+      const params: unknown[] = [snap.snapshotId];
+      const dimParts: string[] = [];
+      if (vendors.length) {
+        params.push(vendors);
+        dimParts.push(`AND vendor = ANY($${params.length}::text[])`);
+      }
+      if (groups.length) {
+        params.push(groups);
+        dimParts.push(`AND material_group = ANY($${params.length}::text[])`);
+      }
+      if (materials.length) {
+        params.push(materials);
+        dimParts.push(`AND material = ANY($${params.length}::text[])`);
+      }
+      const dimSql = dimParts.join('\n        ');
+      let qSql = '';
+      if (q) {
+        params.push(`%${q}%`);
+        const qi = params.length;
+        qSql = `AND (
+            lower(vendor) LIKE $${qi} OR lower(vendor_name) LIKE $${qi} OR
+            lower(material) LIKE $${qi} OR lower(material_description) LIKE $${qi} OR
+            lower(material_group) LIKE $${qi} OR lower(uom) LIKE $${qi} OR
+            lower(group_key) LIKE $${qi}
+          )`;
+      }
+      const filterSql = `${dimSql}\n        ${qSql}`;
+
       const countRes = await client.query<{ n: number }>(
         `
         SELECT count(*)::int AS n
         FROM mb51_aging_agg_rows
         WHERE snapshot_id = $1
-        ${where.replace(/\$3/g, '$2')}
+        ${filterSql}
         `,
-        countParams
+        params
       );
       const total = countRes.rows[0]?.n ?? 0;
       const offset = (page - 1) * pageSize;
-      const listParams = like
-        ? [snap.snapshotId, pageSize, offset, like]
-        : [snap.snapshotId, pageSize, offset];
-      const listWhere = like
-        ? where.replace(/\$3/g, '$4')
-        : '';
-
+      params.push(pageSize);
+      const limIdx = params.length;
+      params.push(offset);
+      const offIdx = params.length;
       const list = await client.query<{
         group_key: string;
         vendor: string;
@@ -322,11 +348,11 @@ export async function fetchMb51AggPage(opts: {
                material_description, uom, bk, total, full_qty, n
         FROM mb51_aging_agg_rows
         WHERE snapshot_id = $1
-        ${listWhere}
+        ${filterSql}
         ORDER BY ${sortSql} ${sortDir > 0 ? 'ASC' : 'DESC'} NULLS LAST, seq ASC
-        LIMIT $2 OFFSET $3
+        LIMIT $${limIdx} OFFSET $${offIdx}
         `,
-        listParams
+        params
       );
 
       const rows: Mb51AgingThinRow[] = list.rows.map((r) => ({
@@ -343,7 +369,63 @@ export async function fetchMb51AggPage(opts: {
         n: r.n,
       }));
 
-      return { rows, total, page, pageSize, paramHash };
+      let summary: Mb51AgingSummary | undefined;
+      if (wantSummary) {
+        // Roll KPIs from filtered agg (no FIFO). Base snapshot meta (basis/gb/…) kept.
+        const rollParams = params.slice(0, params.length - 2); // drop limit/offset
+        const roll = await client.query<{
+          row_count: number;
+          stock_mat: number;
+          used: string;
+          full_tot: string;
+          b1: string;
+          b2: string;
+          b3: string;
+          b4: string;
+          b5: string;
+          b6: string;
+          b7: string;
+        }>(
+          `
+          SELECT
+            count(*)::int AS row_count,
+            count(*) FILTER (WHERE abs(total) > 1e-9)::int AS stock_mat,
+            coalesce(sum(n), 0)::text AS used,
+            coalesce(sum(full_qty), 0)::text AS full_tot,
+            coalesce(sum(bk[1]), 0)::text AS b1,
+            coalesce(sum(bk[2]), 0)::text AS b2,
+            coalesce(sum(bk[3]), 0)::text AS b3,
+            coalesce(sum(bk[4]), 0)::text AS b4,
+            coalesce(sum(bk[5]), 0)::text AS b5,
+            coalesce(sum(bk[6]), 0)::text AS b6,
+            coalesce(sum(bk[7]), 0)::text AS b7
+          FROM mb51_aging_agg_rows
+          WHERE snapshot_id = $1
+          ${filterSql}
+          `,
+          rollParams
+        );
+        const r = roll.rows[0];
+        const tot = r
+          ? [r.b1, r.b2, r.b3, r.b4, r.b5, r.b6, r.b7].map(Number)
+          : [0, 0, 0, 0, 0, 0, 0];
+        summary = {
+          ...snap.summary,
+          paramHash,
+          tot,
+          fullTot: Number(r?.full_tot ?? 0),
+          used: Number(r?.used ?? 0),
+          stockMat: r?.stock_mat ?? 0,
+          rowCount: r?.row_count ?? 0,
+          // not recoverable from agg alone after a dim filter
+          negMat: 0,
+          negQty: 0,
+          plugged: 0,
+          plugQty: 0,
+        };
+      }
+
+      return { rows, total, page, pageSize, paramHash, summary };
     },
     { statementTimeoutMs: LOAD_MS }
   );
@@ -356,6 +438,12 @@ export async function rebuildMb51Report(
   const meta = await fetchMb51Meta(importId);
   if (!meta.latestImport) throw new Error('No MB51 import found');
   const paramHash = hashReportParams(params);
+  // Already have this exact snapshot — skip FIFO.
+  const cached = await withAppClient(
+    async (client) => loadSnapshotSummary(client, meta.latestImport!.id, paramHash),
+    { statementTimeoutMs: LOAD_MS }
+  );
+  if (cached) return { summary: cached.summary, paramHash };
   const built = await materializeMb51Snapshot({
     importId: meta.latestImport.id,
     params,
@@ -514,10 +602,19 @@ export async function fetchMb51Detail(opts: {
   );
 }
 
+export type Mb51FacetField =
+  | 'plants'
+  | 'vendors'
+  | 'groups'
+  | 'materials'
+  | 'movements';
+
 export async function fetchMb51Facets(opts?: {
   q?: string;
   limit?: number;
   importId?: string | null;
+  /** When set, only these lists are queried (search typeahead). */
+  fields?: Mb51FacetField[];
 }): Promise<{
   plants: { id: string; text: string }[];
   vendors: { id: string; text: string }[];
@@ -541,6 +638,11 @@ export async function fetchMb51Facets(opts?: {
     plants: 0,
     movements: 0,
   };
+  const want = new Set<Mb51FacetField>(
+    opts?.fields?.length
+      ? opts.fields
+      : ['plants', 'vendors', 'groups', 'materials', 'movements']
+  );
   return withAppClient(
     async (client) => {
       const latestImport = await latestImportOn(client, opts?.importId);
@@ -558,31 +660,34 @@ export async function fetchMb51Facets(opts?: {
       const like = q ? `%${q}%` : null;
 
       // Prefer totals baked into the default snapshot (fast); fall back to COUNT.
+      // Skip on typeahead search — caller already has totals from the initial load.
       let totals = emptyTotals;
-      const snap = await loadSnapshotSummary(client, id, DEFAULT_PARAM_HASH);
-      if (snap?.summary?.facetTotals) {
-        totals = snap.summary.facetTotals;
-      } else {
-        const totalsRes = await client.query<{
-          vendors: number;
-          materials: number;
-          groups: number;
-          plants: number;
-          movements: number;
-        }>(
-          `
-          SELECT
-            count(DISTINCT NULLIF(vendor, ''))::int AS vendors,
-            count(DISTINCT NULLIF(material, ''))::int AS materials,
-            count(DISTINCT NULLIF(material_group, ''))::int AS groups,
-            count(DISTINCT NULLIF(plant, ''))::int AS plants,
-            count(DISTINCT NULLIF(movement_type, ''))::int AS movements
-          FROM mb51_aging_rows
-          WHERE import_id = $1
-          `,
-          [id]
-        );
-        totals = totalsRes.rows[0] ?? emptyTotals;
+      if (!q) {
+        const snap = await loadSnapshotSummary(client, id, DEFAULT_PARAM_HASH);
+        if (snap?.summary?.facetTotals) {
+          totals = snap.summary.facetTotals;
+        } else {
+          const totalsRes = await client.query<{
+            vendors: number;
+            materials: number;
+            groups: number;
+            plants: number;
+            movements: number;
+          }>(
+            `
+            SELECT
+              count(DISTINCT NULLIF(vendor, ''))::int AS vendors,
+              count(DISTINCT NULLIF(material, ''))::int AS materials,
+              count(DISTINCT NULLIF(material_group, ''))::int AS groups,
+              count(DISTINCT NULLIF(plant, ''))::int AS plants,
+              count(DISTINCT NULLIF(movement_type, ''))::int AS movements
+            FROM mb51_aging_rows
+            WHERE import_id = $1
+            `,
+            [id]
+          );
+          totals = totalsRes.rows[0] ?? emptyTotals;
+        }
       }
 
       async function distinct(
@@ -595,7 +700,10 @@ export async function fetchMb51Facets(opts?: {
               SELECT DISTINCT ${col} AS id, ${labelSql} AS text
               FROM mb51_aging_rows
               WHERE import_id = $1 AND ${col} <> ''
-                AND lower(${labelSql}) LIKE $2
+                AND (
+                  lower(${col}) LIKE $2
+                  OR lower(${labelSql}) LIKE $2
+                )
               ORDER BY text
               LIMIT $3
               `
@@ -611,38 +719,77 @@ export async function fetchMb51Facets(opts?: {
         return res.rows;
       }
 
-      // Always include known defective codes in materials list (for exclude UI).
+      // Prefer SAP Vendor Master name so filter shows "code - name" and
+      // search matches both even when mb51_aging_rows.vendor_name is blank.
+      async function distinctVendors(): Promise<{ id: string; text: string }[]> {
+        const nameExpr = `coalesce(nullif(m.vendor_name, ''), nullif(r.vendor_name, ''), '')`;
+        const labelExpr = `r.vendor || CASE WHEN ${nameExpr} <> '' THEN ' - ' || ${nameExpr} ELSE '' END`;
+        const res = await client.query<{ id: string; text: string }>(
+          like
+            ? `
+              SELECT DISTINCT r.vendor AS id, ${labelExpr} AS text
+              FROM mb51_aging_rows r
+              LEFT JOIN sap_vendor_master m ON m.vendor_code = r.vendor
+              WHERE r.import_id = $1 AND r.vendor <> ''
+                AND (
+                  lower(r.vendor) LIKE $2
+                  OR lower(${nameExpr}) LIKE $2
+                  OR lower(${labelExpr}) LIKE $2
+                )
+              ORDER BY text
+              LIMIT $3
+              `
+            : `
+              SELECT DISTINCT r.vendor AS id, ${labelExpr} AS text
+              FROM mb51_aging_rows r
+              LEFT JOIN sap_vendor_master m ON m.vendor_code = r.vendor
+              WHERE r.import_id = $1 AND r.vendor <> ''
+              ORDER BY text
+              LIMIT $2
+              `,
+          like ? [id, like, limit] : [id, limit]
+        );
+        return res.rows;
+      }
+
+      const empty: { id: string; text: string }[] = [];
       const [plants, vendors, groups, materialsRaw, movements] = await Promise.all([
-        distinct('plant', `plant`),
-        distinct(
-          'vendor',
-          `vendor || ' - ' || coalesce(nullif(vendor_name,''), '')`
-        ),
-        distinct('material_group', `material_group`),
-        distinct(
-          'material',
-          `material || ' - ' || coalesce(nullif(material_description,''), '')`
-        ),
-        distinct(
-          'movement_type',
-          `movement_type || coalesce(' - ' || nullif(movement_type_text,''), '')`
-        ),
+        want.has('plants') ? distinct('plant', `plant`) : Promise.resolve(empty),
+        want.has('vendors') ? distinctVendors() : Promise.resolve(empty),
+        want.has('groups')
+          ? distinct('material_group', `material_group`)
+          : Promise.resolve(empty),
+        want.has('materials')
+          ? distinct(
+              'material',
+              `material || ' - ' || coalesce(nullif(material_description,''), '')`
+            )
+          : Promise.resolve(empty),
+        want.has('movements')
+          ? distinct(
+              'movement_type',
+              `movement_type || coalesce(' - ' || nullif(movement_type_text,''), '')`
+            )
+          : Promise.resolve(empty),
       ]);
 
-      const have = new Set(materialsRaw.map((m) => m.id));
-      const missing = [...DEFAULT_DEFECTIVE_MATERIALS].filter((m) => !have.has(m));
       let materials = materialsRaw;
-      if (missing.length) {
-        const extra = await client.query<{ id: string; text: string }>(
-          `
-          SELECT DISTINCT material AS id,
-            material || ' - ' || coalesce(nullif(material_description,''), '') AS text
-          FROM mb51_aging_rows
-          WHERE import_id = $1 AND material = ANY($2::text[])
-          `,
-          [id, missing]
-        );
-        materials = [...extra.rows, ...materialsRaw];
+      // Seed defective codes only on full (non-search) materials load.
+      if (want.has('materials') && !q) {
+        const have = new Set(materialsRaw.map((m) => m.id));
+        const missing = [...DEFAULT_DEFECTIVE_MATERIALS].filter((m) => !have.has(m));
+        if (missing.length) {
+          const extra = await client.query<{ id: string; text: string }>(
+            `
+            SELECT DISTINCT material AS id,
+              material || ' - ' || coalesce(nullif(material_description,''), '') AS text
+            FROM mb51_aging_rows
+            WHERE import_id = $1 AND material = ANY($2::text[])
+            `,
+            [id, missing]
+          );
+          materials = [...extra.rows, ...materialsRaw];
+        }
       }
 
       return { plants, vendors, groups, materials, movements, totals };

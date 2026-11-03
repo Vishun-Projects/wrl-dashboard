@@ -262,6 +262,14 @@ export const RBAC_PAGES: RbacPage[] = [
     navSection: 'SAP',
   },
   {
+    id: 'sap_vendor_master',
+    permission: 'page_mb51_aging',
+    path: '/admin/vendor-master',
+    label: 'Vendor Master',
+    description: 'SAP Vendor Master — edit names or import Vend Master.xlsx for MB51',
+    group: 'Administration',
+  },
+  {
     id: 'admin_users',
     permission: 'manage_users',
     path: '/admin/users',
