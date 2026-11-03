@@ -35,6 +35,7 @@ const ALL_PERMISSION_SEED = [
   { name: 'page_spare_loan_check', description: 'Upload SAP HTML and highlight SO/vendor mismatches and cancelled/transferred calls' },
   { name: 'page_spare_stock_analysis', description: 'Upload SAP MB51 HTML and view spare stock opening, receipts, issues, and consumption' },
   { name: 'page_mb51_aging', description: 'MB51 Material Aging Report (FIFO) calculated on Posting Date' },
+  { name: 'page_warranty_provision', description: 'Browse Warranty Provision workbook rows imported from SAP .xlsb' },
   { name: 'manage_users', description: 'Create and edit portal users' },
   { name: 'manage_roles', description: 'Define roles and page permissions' },
   { name: 'page_mis_email_settings', description: 'Org settings, MIS email routing, major repair and cancelled-call digests' },

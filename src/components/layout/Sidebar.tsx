@@ -163,6 +163,8 @@ export function Sidebar({ user }: SidebarProps) {
                       ? Hourglass
                     : path === '/report/mb51-table'
                       ? Table
+                    : path === '/report/warranty-provision'
+                      ? Shield
                   : path === '/admin/vendor-master'
                     ? BookUser
                   : path === '/admin/users'

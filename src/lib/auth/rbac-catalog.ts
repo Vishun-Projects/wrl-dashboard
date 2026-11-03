@@ -262,6 +262,15 @@ export const RBAC_PAGES: RbacPage[] = [
     navSection: 'SAP',
   },
   {
+    id: 'warranty_provision',
+    permission: 'page_warranty_provision',
+    path: '/report/warranty-provision',
+    label: 'Warranty Provision',
+    description: 'Browse Warranty Provision workbook rows imported from SAP .xlsb',
+    group: 'Reports',
+    navSection: 'SAP',
+  },
+  {
     id: 'sap_vendor_master',
     permission: 'page_mb51_aging',
     path: '/admin/vendor-master',

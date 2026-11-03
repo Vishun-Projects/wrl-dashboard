@@ -30,6 +30,7 @@ const PAGE_PERMS = [
   'page_zss02',
   'page_spare_stock_analysis',
   'page_mb51_aging',
+  'page_warranty_provision',
   'page_compressor_barcodes',
   'page_rejected_calls',
   'page_warranty_comparison',
