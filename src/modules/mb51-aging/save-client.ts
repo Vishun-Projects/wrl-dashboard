@@ -288,9 +288,9 @@ export async function saveMb51AgingRows(
       `MB51 save lost rows: had ${priorCount.toLocaleString('en-IN')}, now ${latest.rowCount.toLocaleString('en-IN')}`
     );
   }
-  if (latest.rowCount > priorCount + uniqueRows.length) {
+  if (latest.rowCount > priorCount + newTotal) {
     throw new Error(
-      `MB51 save row count too high: stored ${latest.rowCount.toLocaleString('en-IN')} (expected at most ${(priorCount + uniqueRows.length).toLocaleString('en-IN')})`
+      `MB51 save row count too high: stored ${latest.rowCount.toLocaleString('en-IN')} (expected at most ${(priorCount + newTotal).toLocaleString('en-IN')})`
     );
   }
   return latest;
