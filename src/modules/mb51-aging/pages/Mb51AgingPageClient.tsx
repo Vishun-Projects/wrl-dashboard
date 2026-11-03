@@ -647,39 +647,33 @@ export default function Mb51AgingPageClient() {
       }
       if (sumRes.summary.facetTotals) setFacetTotals(sumRes.summary.facetTotals);
 
+      // Post-filter excludes only when the snap did not bake them (else double-filter is a no-op
+      // for those codes, but we must still load page 1 — skipping left Result rows at 0).
+      const snapBakedExcludes = !!(sumRes.params?.excludedMaterials?.length);
       const filters = {
         vendors: [] as string[],
         groups: [] as string[],
         materials: [] as string[],
-        excludedMaterials: uiExcludes,
+        excludedMaterials: snapBakedExcludes ? [] : uiExcludes,
       };
       setSnapshotParams(sumRes.params);
       setAggFilters(filters);
       setPage(1);
       setSearchQuery('');
       skipAggEffectRef.current = true;
-      // When snap has no baked excludes, post-filter UI excludes so KPIs match the chips.
-      const needRollup =
-        uiExcludes.length > 0 && !(sumRes.params?.excludedMaterials?.length);
-      if (needRollup) {
-        const rolled = await fetchMb51AggPage({
-          paramHash: sumRes.summary.paramHash,
-          importId: id,
-          page: 1,
-          pageSize: PAGE_SIZE,
-          sort: 'total',
-          sortDir: -1,
-          excludedMaterials: uiExcludes,
-          withSummary: true,
-        });
-        setThinRows(rolled.rows);
-        setAggTotal(rolled.total);
-        setSummary(rolled.summary ?? sumRes.summary);
-      } else {
-        setSummary(sumRes.summary);
-        setThinRows([]);
-        setAggTotal(0);
-      }
+      const rolled = await fetchMb51AggPage({
+        paramHash: sumRes.summary.paramHash,
+        importId: id,
+        page: 1,
+        pageSize: PAGE_SIZE,
+        sort: 'total',
+        sortDir: -1,
+        excludedMaterials: filters.excludedMaterials,
+        withSummary: filters.excludedMaterials.length > 0,
+      });
+      setThinRows(rolled.rows);
+      setAggTotal(rolled.total);
+      setSummary(rolled.summary ?? sumRes.summary);
       setShowUpload(false);
       setLoadMsg('');
       return true;
