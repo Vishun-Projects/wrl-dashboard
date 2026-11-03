@@ -4,10 +4,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
-import {
-  BUCKETS,
-  DEFAULT_DEFECTIVE_MATERIALS,
-} from '@/modules/mb51-aging/fifo';
+import { BUCKETS } from '@/modules/mb51-aging/fifo';
 import type {
   Mb51AgingGroupBy,
   Mb51AgingMovement,
@@ -300,16 +297,8 @@ export async function resolveDefaultParams(
   importId: string
 ): Promise<Mb51AgingReportParams> {
   const { minD, maxD } = await fetchBounds(client, importId);
-  const present = await client.query<{ material: string }>(
-    `
-    SELECT DISTINCT material
-    FROM mb51_aging_rows
-    WHERE import_id = $1
-      AND material = ANY($2::text[])
-    `,
-    [importId, [...DEFAULT_DEFECTIVE_MATERIALS]]
-  );
   // Basis = today (age as of report day). Posting window still ends at max posting in file.
+  // Excludes stay empty — UI post-filters defective codes so toggling exclude stays fast.
   const today = new Date().toISOString().slice(0, 10);
   return {
     basis: isoDayToSerial(today),
@@ -320,7 +309,7 @@ export async function resolveDefaultParams(
     vendors: [],
     groups: [],
     materials: [],
-    excludedMaterials: present.rows.map((r) => r.material),
+    excludedMaterials: [],
   };
 }
 

@@ -231,7 +231,8 @@ export async function fetchMb51AggPage(opts: {
   vendors?: string[];
   groups?: string[];
   materials?: string[];
-  /** When true (or any dim filter set), also roll up KPI totals from matching agg rows. */
+  excludedMaterials?: string[];
+  /** When true, also roll up KPI totals from matching agg rows. */
   withSummary?: boolean;
 }): Promise<{
   rows: Mb51AgingThinRow[];
@@ -250,6 +251,7 @@ export async function fetchMb51AggPage(opts: {
   const vendors = (opts.vendors || []).filter(Boolean);
   const groups = (opts.groups || []).filter(Boolean);
   const materials = (opts.materials || []).filter(Boolean);
+  const excludedMaterials = (opts.excludedMaterials || []).filter(Boolean);
   // Only when asked — auto-rollup on every paged fetch rewrote summary and
   // retriggered the client page effect in a loop.
   const wantSummary = !!opts.withSummary;
@@ -300,6 +302,10 @@ export async function fetchMb51AggPage(opts: {
       if (materials.length) {
         params.push(materials);
         dimParts.push(`AND material = ANY($${params.length}::text[])`);
+      }
+      if (excludedMaterials.length) {
+        params.push(excludedMaterials);
+        dimParts.push(`AND material <> ALL($${params.length}::text[])`);
       }
       const dimSql = dimParts.join('\n        ');
       let qSql = '';

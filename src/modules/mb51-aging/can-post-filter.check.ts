@@ -20,9 +20,19 @@ assert.equal(canPostFilterMb51Agg(base, { ...base, groups: ['G1'] }), true);
 assert.equal(canPostFilterMb51Agg(base, { ...base, plants: ['P1'] }), false);
 assert.equal(canPostFilterMb51Agg(base, { ...base, basis: 46001 }), false);
 assert.equal(canPostFilterMb51Agg(base, { ...base, groupBy: 'mat' }), false);
+// excluding more is a post-filter
 assert.equal(
   canPostFilterMb51Agg(base, { ...base, excludedMaterials: ['1301709', 'x'] }),
-  false
+  true
+);
+// un-excluding needs rows the snap never computed
+assert.equal(canPostFilterMb51Agg(base, { ...base, excludedMaterials: [] }), false);
+assert.equal(
+  canPostFilterMb51Agg(
+    { ...base, excludedMaterials: [] },
+    { ...base, excludedMaterials: ['1301709'] }
+  ),
+  true
 );
 assert.equal(
   canPostFilterMb51Agg(

@@ -436,12 +436,13 @@ export default function Mb51AgingPageClient() {
   const [paramHash, setParamHash] = useState('default');
   /** Params baked into the loaded snapshot (for filter-vs-recompute decide). */
   const [snapshotParams, setSnapshotParams] = useState<Mb51AgingReportParams | null>(null);
-  /** Dim filters applied on top of the current snapshot (no FIFO). */
+  /** Dim + exclude filters applied on top of the current snapshot (no FIFO). */
   const [aggFilters, setAggFilters] = useState<{
     vendors: string[];
     groups: string[];
     materials: string[];
-  }>({ vendors: [], groups: [], materials: [] });
+    excludedMaterials: string[];
+  }>({ vendors: [], groups: [], materials: [], excludedMaterials: [] });
   const [aggTotal, setAggTotal] = useState(0);
   const [summary, setSummary] = useState<Mb51AgingSummary | null>(null);
   const [thinRows, setThinRows] = useState<Mb51AgingThinRow[]>([]);
@@ -494,7 +495,12 @@ export default function Mb51AgingPageClient() {
       sort: string,
       dir: number,
       importId?: string | null,
-      filters?: { vendors: string[]; groups: string[]; materials: string[] },
+      filters?: {
+        vendors: string[];
+        groups: string[];
+        materials: string[];
+        excludedMaterials: string[];
+      },
       withSummary = false
     ) => {
       const f = filters ?? aggFiltersRef.current;
@@ -509,6 +515,7 @@ export default function Mb51AgingPageClient() {
         vendors: f.vendors,
         groups: f.groups,
         materials: f.materials,
+        excludedMaterials: f.excludedMaterials,
         withSummary,
       });
       setThinRows(agg.rows);
@@ -606,18 +613,13 @@ export default function Mb51AgingPageClient() {
       );
       if (facets.totals) setFacetTotals(facets.totals);
 
-      // Prefer excludes baked into the snapshot (matches KPIs). Fall back to defective defaults in DB.
-      if (sumRes.params?.excludedMaterials?.length) {
-        setExcludedMaterials(new Set(sumRes.params.excludedMaterials));
-      } else {
-        setExcludedMaterials(
-          new Set(
-            DEFAULT_DEFECTIVE_MATERIALS.filter((m) =>
-              facets.materials.some((f) => f.id === m)
-            )
-          )
-        );
-      }
+      // UI exclude chips: snap bake if present, else known defectives present in data.
+      const uiExcludes = sumRes.params?.excludedMaterials?.length
+        ? [...sumRes.params.excludedMaterials]
+        : DEFAULT_DEFECTIVE_MATERIALS.filter((m) =>
+            facets.materials.some((f) => f.id === m)
+          );
+      setExcludedMaterials(new Set(uiExcludes));
 
       if (!sumRes.summary) {
         setSummary(null);
@@ -633,9 +635,6 @@ export default function Mb51AgingPageClient() {
       }
 
       setParamHash(sumRes.summary.paramHash);
-      setSummary(sumRes.summary);
-      setSnapshotParams(sumRes.params);
-      setAggFilters({ vendors: [], groups: [], materials: [] });
       setGroupBy(sumRes.summary.gb);
       // Sync date pickers to the snapshot that produced these KPIs
       if (sumRes.params) {
@@ -647,8 +646,40 @@ export default function Mb51AgingPageClient() {
         if (t) setDateTo(t);
       }
       if (sumRes.summary.facetTotals) setFacetTotals(sumRes.summary.facetTotals);
+
+      const filters = {
+        vendors: [] as string[],
+        groups: [] as string[],
+        materials: [] as string[],
+        excludedMaterials: uiExcludes,
+      };
+      setSnapshotParams(sumRes.params);
+      setAggFilters(filters);
       setPage(1);
       setSearchQuery('');
+      skipAggEffectRef.current = true;
+      // When snap has no baked excludes, post-filter UI excludes so KPIs match the chips.
+      const needRollup =
+        uiExcludes.length > 0 && !(sumRes.params?.excludedMaterials?.length);
+      if (needRollup) {
+        const rolled = await fetchMb51AggPage({
+          paramHash: sumRes.summary.paramHash,
+          importId: id,
+          page: 1,
+          pageSize: PAGE_SIZE,
+          sort: 'total',
+          sortDir: -1,
+          excludedMaterials: uiExcludes,
+          withSummary: true,
+        });
+        setThinRows(rolled.rows);
+        setAggTotal(rolled.total);
+        setSummary(rolled.summary ?? sumRes.summary);
+      } else {
+        setSummary(sumRes.summary);
+        setThinRows([]);
+        setAggTotal(0);
+      }
       setShowUpload(false);
       setLoadMsg('');
       return true;
@@ -662,7 +693,7 @@ export default function Mb51AgingPageClient() {
     async function loadSavedData() {
       try {
         setLoading(true);
-        setLoadMsg('Loading KPIs…');
+        setLoadMsg('Loading…');
         const preferred = readStoredImportId();
         const meta = await fetchMb51Meta(preferred);
         if (!active) return;
@@ -728,18 +759,23 @@ export default function Mb51AgingPageClient() {
       setLoading(true);
       setIsErrMsg(false);
 
+      const filters = {
+        vendors: nextParams.vendors,
+        groups: nextParams.groups,
+        materials: nextParams.materials,
+        excludedMaterials: nextParams.excludedMaterials,
+      };
+      const hasPostFilter =
+        filters.vendors.length +
+          filters.groups.length +
+          filters.materials.length +
+          filters.excludedMaterials.length >
+        0;
+
       // Fast path: same FIFO basis as loaded snapshot → filter agg rows only
       if (snapshotParams && canPostFilterMb51Agg(snapshotParams, nextParams)) {
         setLoadMsg('Filtering…');
-        const filters = {
-          vendors: nextParams.vendors,
-          groups: nextParams.groups,
-          materials: nextParams.materials,
-        };
-        const hasDim =
-          filters.vendors.length + filters.groups.length + filters.materials.length > 0;
-        if (!hasDim) {
-          // No dim filters — restore baked snapshot KPIs (don't zero neg/plug via rollup).
+        if (!hasPostFilter) {
           const sumRes = await fetchMb51Summary(paramHash, activeImportId);
           if (sumRes.summary) setSummary(sumRes.summary);
         }
@@ -754,20 +790,32 @@ export default function Mb51AgingPageClient() {
           sortDir,
           activeImportId,
           filters,
-          hasDim
+          hasPostFilter
         );
         setLoadMsg('');
         setShowUpload(false);
         return;
       }
 
+      // Slow path: rematerialize a reusable base (no dim/exclude bake) then post-filter.
+      // Dim filters + excludes stay out of FIFO so later Generate clicks stay fast.
       setLoadMsg('Computing aging…');
-      const rebuilt = await postMb51Report(nextParams, activeImportId);
+      const baseParams: Mb51AgingReportParams = {
+        basis: nextParams.basis,
+        from: nextParams.from,
+        to: nextParams.to,
+        groupBy: nextParams.groupBy,
+        plants: nextParams.plants,
+        vendors: [],
+        groups: [],
+        materials: [],
+        excludedMaterials: [],
+      };
+      const rebuilt = await postMb51Report(baseParams, activeImportId);
       skipAggEffectRef.current = true;
       setParamHash(rebuilt.paramHash);
-      setSummary(rebuilt.summary);
-      setSnapshotParams(nextParams);
-      setAggFilters({ vendors: [], groups: [], materials: [] });
+      setSnapshotParams(baseParams);
+      setAggFilters(filters);
       setPage(1);
       await loadAggPage(
         rebuilt.paramHash,
@@ -776,8 +824,10 @@ export default function Mb51AgingPageClient() {
         sortKey || 'total',
         sortDir,
         activeImportId,
-        { vendors: [], groups: [], materials: [] }
+        filters,
+        hasPostFilter
       );
+      if (!hasPostFilter) setSummary(rebuilt.summary);
       setLoadMsg('');
       setShowUpload(false);
     } catch (err: unknown) {
@@ -1130,6 +1180,7 @@ export default function Mb51AgingPageClient() {
         vendors: aggFilters.vendors,
         groups: aggFilters.groups,
         materials: aggFilters.materials,
+        excludedMaterials: aggFilters.excludedMaterials,
       });
       all.push(...chunk.rows);
       if (all.length >= chunk.total || !chunk.rows.length) break;
@@ -1182,7 +1233,7 @@ export default function Mb51AgingPageClient() {
   };
 
   const hasSummary = summary != null;
-  const aggFilterKey = `${aggFilters.vendors.join('\0')}\n${aggFilters.groups.join('\0')}\n${aggFilters.materials.join('\0')}`;
+  const aggFilterKey = `${aggFilters.vendors.join('\0')}\n${aggFilters.groups.join('\0')}\n${aggFilters.materials.join('\0')}\n${aggFilters.excludedMaterials.join('\0')}`;
 
   // Reset to page 1 when search/sort/filters change
   useEffect(() => {

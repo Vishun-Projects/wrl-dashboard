@@ -422,7 +422,7 @@ export default function Mb51TablePageClient() {
     async function loadSavedData() {
       try {
         setLoading(true);
-        setLoadMsg('Loading KPIs…');
+        setLoadMsg('Loading…');
         const preferred = readStoredImportId();
         const meta = await fetchMb51Meta(preferred);
         if (!active) return;

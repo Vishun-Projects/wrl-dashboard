@@ -72,6 +72,7 @@ export async function fetchMb51AggPage(opts: {
   vendors?: string[];
   groups?: string[];
   materials?: string[];
+  excludedMaterials?: string[];
   withSummary?: boolean;
 }): Promise<{
   rows: Mb51AgingThinRow[];
@@ -92,6 +93,9 @@ export async function fetchMb51AggPage(opts: {
   if (opts.vendors?.length) sp.set('vendors', opts.vendors.join(','));
   if (opts.groups?.length) sp.set('groups', opts.groups.join(','));
   if (opts.materials?.length) sp.set('materials', opts.materials.join(','));
+  if (opts.excludedMaterials?.length) {
+    sp.set('excludedMaterials', opts.excludedMaterials.join(','));
+  }
   if (opts.withSummary) sp.set('withSummary', '1');
   return getJson(`/api/report/mb51-aging/agg?${sp}`);
 }

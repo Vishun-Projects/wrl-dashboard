@@ -9,7 +9,11 @@ function sameSorted(a: string[], b: string[]): boolean {
 
 /**
  * True when `next` can be applied by filtering already-materialized agg rows
- * of `snap` (no FIFO recompute). Plants are not on agg → any plant filter forces recompute.
+ * of `snap` (no FIFO recompute).
+ *
+ * Excludes are post-filters: next may exclude *more* than snap, but cannot
+ * un-exclude materials snap never computed (those rows are missing).
+ * Plants are baked into FIFO — must match exactly; empty on both is fine.
  */
 export function canPostFilterMb51Agg(
   snap: Mb51AgingReportParams,
@@ -23,8 +27,12 @@ export function canPostFilterMb51Agg(
   ) {
     return false;
   }
-  if (!sameSorted(next.excludedMaterials, snap.excludedMaterials)) return false;
-  if (next.plants.length) return false;
+  if (!sameSorted(next.plants, snap.plants)) return false;
+
+  const nextEx = new Set(next.excludedMaterials);
+  for (const m of snap.excludedMaterials) {
+    if (!nextEx.has(m)) return false;
+  }
 
   const gb = next.groupBy;
   if (next.vendors.length && gb !== 'vendor' && gb !== 'vm') return false;

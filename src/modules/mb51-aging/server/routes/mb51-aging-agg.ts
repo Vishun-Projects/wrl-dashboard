@@ -30,6 +30,7 @@ export async function GET(req: NextRequest) {
         vendors: csv('vendors'),
         groups: csv('groups'),
         materials: csv('materials'),
+        excludedMaterials: csv('excludedMaterials'),
         withSummary: sp.get('withSummary') === '1',
       })
     );
