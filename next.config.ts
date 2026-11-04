@@ -42,11 +42,13 @@ function buildContentSecurityPolicy(): string {
 
   const connectParts = ["connect-src 'self'", vercelAnalytics, ...supabaseConnectOrigins()];
   if (isDev) {
-    // Turbopack HMR + local API during `next dev`
+    // Turbopack HMR + local API during `next dev` (incl. LAN hostname bind)
     connectParts.push(
       'ws://localhost:*',
       'http://localhost:*',
       'ws://127.0.0.1:*',
+      'ws://10.100.85.64:*',
+      'http://10.100.85.64:*',
       leafletCdn
     );
   }
@@ -86,6 +88,8 @@ function buildSecurityHeaders() {
 }
 
 const nextConfig: NextConfig = {
+  // LAN access to `next dev` static/HMR chunks (e.g. http://10.100.85.64:3080)
+  allowedDevOrigins: ['10.100.85.64'],
   turbopack: {
     root: path.join(appDir),
   },

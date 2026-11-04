@@ -9,12 +9,27 @@ function originOf(urlOrOrigin: string): string | null {
   }
 }
 
+function hostHeaderOrigin(req: Request): string | null {
+  const host = (req.headers.get('x-forwarded-host') || req.headers.get('host') || '')
+    .split(',')[0]
+    ?.trim();
+  if (!host) return null;
+  // Prefer forwarded proto; fall back from request URL; default http for local LAN.
+  const scheme =
+    (req.headers.get('x-forwarded-proto') || '').split(',')[0]?.trim() ||
+    (originOf(req.url)?.startsWith('https:') ? 'https' : 'http');
+  return originOf(`${scheme}://${host}`);
+}
+
 function allowedOrigins(req: Request): Set<string> {
   const allowed = new Set<string>();
   const app = originOf(resolveAppOrigin());
   if (app) allowed.add(app);
   const requestOrigin = originOf(req.url);
   if (requestOrigin) allowed.add(requestOrigin);
+  // LAN / hostname bind: browser Origin is http://10.x.x.x:port but req.url may be localhost.
+  const hostOrigin = hostHeaderOrigin(req);
+  if (hostOrigin) allowed.add(hostOrigin);
   return allowed;
 }
 

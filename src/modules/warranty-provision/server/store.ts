@@ -1,4 +1,6 @@
 import { withAppClient } from '@/lib/read-model/db';
+import { remainingDays, warrantyStatus } from '@/modules/warranty-provision/fy';
+import { parseAsOf } from '@/modules/warranty-provision/server/snap';
 import type {
   WarrantyProvisionOptions,
   WarrantyProvisionRow,
@@ -11,11 +13,12 @@ export type WarrantyProvisionFilters = {
   states: string[];
   cities: string[];
   materials: string[];
-  warrantyRemainingDays: string[];
   warrantyEndFys: string[];
+  status: '' | 'Active' | 'Inactive';
   q: string;
   billingFrom: string;
   billingTo: string;
+  asOf: string;
   page: number;
   pageSize: number;
 };
@@ -48,10 +51,6 @@ function buildWhere(
     conds.push(`material = ANY($${i++}::text[])`);
     values.push(filters.materials);
   }
-  if (filters.warrantyRemainingDays.length) {
-    conds.push(`warranty_remaining_days = ANY($${i++}::text[])`);
-    values.push(filters.warrantyRemainingDays);
-  }
   if (filters.warrantyEndFys.length) {
     conds.push(`warranty_end_fy = ANY($${i++}::text[])`);
     values.push(filters.warrantyEndFys);
@@ -63,6 +62,15 @@ function buildWhere(
   if (filters.billingTo) {
     conds.push(`billing_date <= $${i++}::date`);
     values.push(filters.billingTo);
+  }
+  if (filters.status === 'Active' || filters.status === 'Inactive') {
+    const asOfParam = i++;
+    values.push(parseAsOf(filters.asOf));
+    if (filters.status === 'Active') {
+      conds.push(`warranty_end_date IS NOT NULL AND warranty_end_date > $${asOfParam}::date`);
+    } else {
+      conds.push(`(warranty_end_date IS NULL OR warranty_end_date <= $${asOfParam}::date)`);
+    }
   }
   const q = filters.q.trim();
   if (q) {
@@ -76,7 +84,6 @@ function buildWhere(
   return { sql: conds.join(' AND '), values, next: i };
 }
 
-/** pg `date` → YYYY-MM-DD (local calendar). Never String(date).slice / toISOString. */
 function pgDate(v: unknown): string | null {
   if (v == null || v === '') return null;
   if (v instanceof Date && !Number.isNaN(v.getTime())) {
@@ -90,11 +97,14 @@ function pgDate(v: unknown): string | null {
   return m ? m[1] : null;
 }
 
-function mapRow(r: Record<string, unknown>): WarrantyProvisionRow {
+function mapRow(r: Record<string, unknown>, asOf: string): WarrantyProvisionRow {
+  const end = pgDate(r.warranty_end_date);
+  const rem = end ? remainingDays(end, asOf) : null;
   return {
     id: Number(r.id) || 0,
     billingDocument: String(r.billing_document ?? ''),
     billingDate: pgDate(r.billing_date),
+    billingYear: r.billing_year == null || r.billing_year === '' ? null : Number(r.billing_year),
     material: String(r.material ?? ''),
     serialNumber: String(r.serial_number ?? ''),
     materialGroup: String(r.material_group ?? ''),
@@ -106,10 +116,10 @@ function mapRow(r: Record<string, unknown>): WarrantyProvisionRow {
     shipToPartyCity: String(r.ship_to_party_city ?? ''),
     inventoryNumber: String(r.inventory_number ?? ''),
     warrantyStart: pgDate(r.warranty_start),
-    warrantyEndDate: pgDate(r.warranty_end_date),
+    warrantyEndDate: end,
     days: r.days == null || r.days === '' ? null : Number(r.days),
-    remainingDays: r.remaining_days == null || r.remaining_days === '' ? null : Number(r.remaining_days),
-    warrantyRemainingDays: String(r.warranty_remaining_days ?? ''),
+    remainingDays: rem,
+    warrantyStatus: end ? warrantyStatus(end, asOf) : null,
     warrantyEndFy: String(r.warranty_end_fy ?? ''),
   };
 }
@@ -122,7 +132,6 @@ export async function fetchWarrantyProvisionOptions(): Promise<WarrantyProvision
       states: string[] | null;
       cities: string[] | null;
       materials: string[] | null;
-      warranty_remaining_days: string[] | null;
       warranty_end_fys: string[] | null;
     }>(`
       SELECT
@@ -131,7 +140,6 @@ export async function fetchWarrantyProvisionOptions(): Promise<WarrantyProvision
         ARRAY(SELECT DISTINCT ship_to_party_state FROM warranty_provision_rows WHERE ship_to_party_state <> '' ORDER BY 1) AS states,
         ARRAY(SELECT DISTINCT ship_to_party_city FROM warranty_provision_rows WHERE ship_to_party_city <> '' ORDER BY 1 LIMIT 2000) AS cities,
         ARRAY(SELECT DISTINCT material FROM warranty_provision_rows WHERE material <> '' ORDER BY 1 LIMIT 2000) AS materials,
-        ARRAY(SELECT DISTINCT warranty_remaining_days FROM warranty_provision_rows WHERE warranty_remaining_days <> '' ORDER BY 1) AS warranty_remaining_days,
         ARRAY(SELECT DISTINCT warranty_end_fy FROM warranty_provision_rows WHERE warranty_end_fy <> '' ORDER BY 1) AS warranty_end_fys
     `);
     const r = rows[0] ?? {};
@@ -141,7 +149,6 @@ export async function fetchWarrantyProvisionOptions(): Promise<WarrantyProvision
       states: r.states ?? [],
       cities: r.cities ?? [],
       materials: r.materials ?? [],
-      warrantyRemainingDays: r.warranty_remaining_days ?? [],
       warrantyEndFys: r.warranty_end_fys ?? [],
     };
   });
@@ -150,8 +157,9 @@ export async function fetchWarrantyProvisionOptions(): Promise<WarrantyProvision
 export async function queryWarrantyProvisionRows(
   filters: WarrantyProvisionFilters
 ): Promise<WarrantyProvisionRowsResponse> {
+  const asOf = parseAsOf(filters.asOf);
   return withAppClient(async (client) => {
-    const { sql, values, next } = buildWhere(filters);
+    const { sql, values, next } = buildWhere({ ...filters, asOf });
     const countRes = await client.query<{ n: string }>(
       `SELECT count(*)::text AS n FROM warranty_provision_rows WHERE ${sql}`,
       values
@@ -169,7 +177,7 @@ export async function queryWarrantyProvisionRows(
       [...values, filters.pageSize, offset]
     );
     return {
-      rows: pageRes.rows.map((r) => mapRow(r as Record<string, unknown>)),
+      rows: pageRes.rows.map((r) => mapRow(r as Record<string, unknown>, asOf)),
       total,
       page: filters.page,
       pageSize: filters.pageSize,

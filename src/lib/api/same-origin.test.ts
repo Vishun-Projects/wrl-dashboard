@@ -62,4 +62,16 @@ describe('assertSameOriginMutation', () => {
     });
     expect(assertSameOriginMutation(req)).toBeNull();
   });
+
+  it('allows LAN Origin when Host header matches even if req.url is localhost', () => {
+    process.env.NEXT_PUBLIC_SITE_URL = 'http://localhost:3080';
+    const req = new Request('http://localhost:3080/api/x', {
+      method: 'POST',
+      headers: {
+        Origin: 'http://10.100.85.64:3080',
+        Host: '10.100.85.64:3080',
+      },
+    });
+    expect(assertSameOriginMutation(req)).toBeNull();
+  });
 });

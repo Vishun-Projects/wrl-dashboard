@@ -266,7 +266,7 @@ export const RBAC_PAGES: RbacPage[] = [
     permission: 'page_warranty_provision',
     path: '/report/warranty-provision',
     label: 'Warranty Provision',
-    description: 'Browse Warranty Provision workbook rows imported from SAP .xlsb',
+    description: 'SNAP coverage, units, claim rates, and warranty cost forecast',
     group: 'Reports',
     navSection: 'SAP',
   },

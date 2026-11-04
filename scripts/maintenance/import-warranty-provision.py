@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Stream-import Warranty Provision Excel Binary Workbook (.xlsb) — all sheets.
-Flat table only (no import parent / FK).
+Stream-import Warranty Provision .xlsb — input columns only; recompute end/FY.
+Upserts on (billing_document, serial_number).
 
 Usage:
   python scripts/maintenance/import-warranty-provision.py
-  python scripts/maintenance/import-warranty-provision.py "path/to/file.xlsb"
+  python scripts/maintenance/import-warranty-provision.py --sheet Data3
+  python scripts/maintenance/import-warranty-provision.py --replace
 """
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_FILE = ROOT / "Warranty Prov working_October26.xlsb"
 BATCH = 1000
 
-EXPECTED = [
+INPUT_HEADERS = [
     "billingdocument",
     "billingdate",
     "material",
@@ -42,11 +43,7 @@ EXPECTED = [
     "shiptopartycity",
     "inventorynumber",
     "warranty",
-    "warrantyenddate",
     "days",
-    "remaningdays",
-    "warrantyremaningdays",
-    "warrantyendfy",
 ]
 
 
@@ -115,17 +112,17 @@ def cell_int(v):
         return None
 
 
+def fy_label(end: date) -> str:
+    y = end.year if end.month >= 4 else end.year - 1
+    return f"{y % 100:02d}-{(y + 1) % 100:02d}"
+
+
 def map_header(vals) -> dict:
     out = {}
     for i, v in enumerate(vals):
         key = norm(v)
-        if not key:
-            continue
-        if key == "remainingdays":
-            key = "remaningdays"
-        elif key == "warrantyremainingdays":
-            key = "warrantyremaningdays"
-        out[key] = i
+        if key:
+            out[key] = i
     return out
 
 
@@ -136,14 +133,95 @@ def get(hdr, key, vals):
     return vals[ix]
 
 
-def apply_schema(cur) -> None:
-    sql_path = ROOT / "docs" / "read-model-phase1-schema" / "66-warranty-provision.sql"
-    cur.execute(sql_path.read_text(encoding="utf-8"))
+def apply_schema(conn) -> None:
+    """Apply schema chunks statement-by-statement with autocommit.
+
+    Never wrap 67's backfill + DROP COLUMN in one long transaction — that holds
+    AccessExclusiveLock and lock-timeouts the live SNAP/options queries.
+    """
+    prev = conn.autocommit
+    conn.autocommit = True
+    try:
+        with conn.cursor() as cur:
+            for name in ("66-warranty-provision.sql", "67-warranty-provision-snap.sql"):
+                sql_path = ROOT / "docs" / "read-model-phase1-schema" / name
+                if not sql_path.exists():
+                    continue
+                text = sql_path.read_text(encoding="utf-8")
+                if name.startswith("67-"):
+                    cur.execute(
+                        "SELECT 1 FROM pg_indexes WHERE indexname = 'ux_wp_doc_serial'"
+                    )
+                    if cur.fetchone():
+                        # Backfill/unique already done — only ensure phase-2 tables.
+                        marker = "-- Claims + assumptions"
+                        tail = text.split(marker, 1)[1] if marker in text else ""
+                        for stmt in _split_sql(tail):
+                            cur.execute(stmt)
+                        print(f"  {name}: skipped backfill (ux_wp_doc_serial present)", flush=True)
+                        continue
+                for stmt in _split_sql(text):
+                    cur.execute(stmt)
+                print(f"  {name}: ok", flush=True)
+    finally:
+        conn.autocommit = prev
+
+
+def _split_sql(sql: str) -> list[str]:
+    """Split on semicolons outside dollar-quotes. Enough for our schema files."""
+    parts: list[str] = []
+    buf: list[str] = []
+    i = 0
+    in_dollar = False
+    while i < len(sql):
+        if sql.startswith("$$", i):
+            in_dollar = not in_dollar
+            buf.append("$$")
+            i += 2
+            continue
+        ch = sql[i]
+        if ch == ";" and not in_dollar:
+            stmt = "".join(buf).strip()
+            if stmt and not all(line.strip().startswith("--") or not line.strip() for line in stmt.splitlines()):
+                parts.append(stmt)
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    stmt = "".join(buf).strip()
+    if stmt:
+        parts.append(stmt)
+    return parts
+
+
+def parse_args(argv: list[str]) -> tuple[Path, str | None, bool]:
+    only_sheet: str | None = None
+    replace = False
+    positional: list[str] = []
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--replace":
+            replace = True
+            i += 1
+            continue
+        if argv[i] == "--sheet" and i + 1 < len(argv):
+            only_sheet = argv[i + 1]
+            i += 2
+            continue
+        if argv[i].startswith("--sheet="):
+            only_sheet = argv[i].split("=", 1)[1]
+            i += 1
+            continue
+        positional.append(argv[i])
+        i += 1
+    file_path = Path(positional[0]) if positional else DEFAULT_FILE
+    return file_path, only_sheet, replace
 
 
 def main() -> int:
     load_env()
-    file_path = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_FILE
+    file_path, only_sheet, replace = parse_args(sys.argv[1:])
     db_url = os.environ.get("DIRECT_DATABASE_URL") or os.environ.get("DATABASE_URL")
     if not db_url:
         print("DATABASE_URL is required", file=sys.stderr)
@@ -157,11 +235,12 @@ def main() -> int:
     conn.autocommit = False
     try:
         with conn.cursor() as cur:
-            apply_schema(cur)
-            conn.commit()
+            apply_schema(conn)
             print("schema ok", flush=True)
 
-            cur.execute("TRUNCATE warranty_provision_rows RESTART IDENTITY")
+            if replace and only_sheet is None:
+                cur.execute("TRUNCATE warranty_provision_rows RESTART IDENTITY CASCADE")
+
             parsed = 0
             skipped = 0
             batch: list[tuple] = []
@@ -174,11 +253,29 @@ def main() -> int:
                     cur,
                     """
                     INSERT INTO warranty_provision_rows (
-                      billing_document, billing_date, material, serial_number,
+                      billing_document, billing_date, billing_year, material, serial_number,
                       material_group, external_material_group, sold_to_party_name, customer_subgroup,
                       ship_to_party_name, ship_to_party_state, ship_to_party_city, inventory_number,
-                      warranty_start, warranty_end_date, days, remaining_days, warranty_remaining_days, warranty_end_fy
+                      warranty_start, warranty_end_date, days, warranty_end_fy
                     ) VALUES %s
+                    ON CONFLICT (billing_document, serial_number)
+                    WHERE billing_document <> '' AND serial_number <> ''
+                    DO UPDATE SET
+                      billing_date = EXCLUDED.billing_date,
+                      billing_year = EXCLUDED.billing_year,
+                      material = EXCLUDED.material,
+                      material_group = EXCLUDED.material_group,
+                      external_material_group = EXCLUDED.external_material_group,
+                      sold_to_party_name = EXCLUDED.sold_to_party_name,
+                      customer_subgroup = EXCLUDED.customer_subgroup,
+                      ship_to_party_name = EXCLUDED.ship_to_party_name,
+                      ship_to_party_state = EXCLUDED.ship_to_party_state,
+                      ship_to_party_city = EXCLUDED.ship_to_party_city,
+                      inventory_number = EXCLUDED.inventory_number,
+                      warranty_start = EXCLUDED.warranty_start,
+                      warranty_end_date = EXCLUDED.warranty_end_date,
+                      days = EXCLUDED.days,
+                      warranty_end_fy = EXCLUDED.warranty_end_fy
                     """,
                     batch,
                     page_size=BATCH,
@@ -187,7 +284,11 @@ def main() -> int:
 
             with open_workbook(str(file_path)) as wb:
                 print(f"sheets: {wb.sheets}", flush=True)
-                for sheet_name in wb.sheets:
+                if only_sheet and only_sheet not in wb.sheets:
+                    print(f"sheet not found: {only_sheet}", file=sys.stderr)
+                    return 1
+                target = [only_sheet] if only_sheet else list(wb.sheets)
+                for sheet_name in target:
                     with wb.get_sheet(sheet_name) as sheet:
                         hdr = None
                         sheet_rows = 0
@@ -196,11 +297,11 @@ def main() -> int:
                             vals = [c.v for c in row]
                             if i == 0:
                                 hdr = map_header(vals)
-                                if "billingdocument" not in hdr:
-                                    print(f"  {sheet_name}: skipped (no Billing Document header)", flush=True)
+                                if "billingdocument" not in hdr or "warranty" not in hdr or "days" not in hdr:
+                                    print(f"  {sheet_name}: skipped (need Billing Document, Warranty, Days)", flush=True)
                                     hdr = None
                                     break
-                                missing = [h for h in EXPECTED if h not in hdr]
+                                missing = [h for h in INPUT_HEADERS if h not in hdr]
                                 if missing:
                                     print(f"  {sheet_name}: soft-missing {', '.join(missing)}", flush=True)
                                 continue
@@ -210,16 +311,20 @@ def main() -> int:
                                 sheet_skip += 1
                                 continue
                             billing = cell_text(get(hdr, "billingdocument", vals))
-                            material = cell_text(get(hdr, "material", vals))
                             serial = cell_text(get(hdr, "serialnumber", vals))
-                            if not billing and not material and not serial:
+                            start = cell_date(get(hdr, "warranty", vals))
+                            days = cell_int(get(hdr, "days", vals))
+                            billing_date = cell_date(get(hdr, "billingdate", vals))
+                            if not billing and not serial:
                                 sheet_skip += 1
                                 continue
+                            end = start + timedelta(days=days) if start is not None and days is not None else None
                             batch.append(
                                 (
                                     billing,
-                                    cell_date(get(hdr, "billingdate", vals)),
-                                    material,
+                                    billing_date,
+                                    billing_date.year if billing_date else None,
+                                    cell_text(get(hdr, "material", vals)),
                                     serial,
                                     cell_text(get(hdr, "materialgroup", vals)),
                                     cell_text(get(hdr, "externalmaterialgroup", vals)),
@@ -229,12 +334,10 @@ def main() -> int:
                                     cell_text(get(hdr, "shiptopartystate", vals)),
                                     cell_text(get(hdr, "shiptopartycity", vals)),
                                     cell_text(get(hdr, "inventorynumber", vals)),
-                                    cell_date(get(hdr, "warranty", vals)),
-                                    cell_date(get(hdr, "warrantyenddate", vals)),
-                                    cell_int(get(hdr, "days", vals)),
-                                    cell_int(get(hdr, "remaningdays", vals)),
-                                    cell_text(get(hdr, "warrantyremaningdays", vals)),
-                                    cell_text(get(hdr, "warrantyendfy", vals)),
+                                    start,
+                                    end,
+                                    days,
+                                    fy_label(end) if end else "",
                                 )
                             )
                             sheet_rows += 1
