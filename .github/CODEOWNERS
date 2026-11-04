@@ -1,0 +1,9 @@
+# MIS mail formula lock (Nov 2026) — do not change these without owner review.
+# In GitHub → Settings → Branches → require review from Code Owners on main.
+src/modules/mis-email/services/compose-digest.ts @Vishun-Projects
+src/modules/mis-email/services/mail-basis.ts @Vishun-Projects
+src/modules/mis-email/services/body-sections.ts @Vishun-Projects
+src/modules/mis/services/plant-to-wrl-branch.ts @Vishun-Projects
+src/modules/mis/services/mis-unified-metrics.ts @Vishun-Projects
+src/modules/mis/services/bd-mis-excel-export.ts @Vishun-Projects
+scripts/quality/check-mis-mail-formula.mjs @Vishun-Projects

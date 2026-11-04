@@ -1,1 +1,2 @@
 npm run check:feature-boundaries
+npm run check:mis-mail-formula

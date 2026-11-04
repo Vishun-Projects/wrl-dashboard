@@ -7,6 +7,7 @@ if [ -n "$remote_tip" ]; then
 fi
 
 npm run check:feature-boundaries
+npm run check:mis-mail-formula
 npm test
 # Turbopack may rewrite .next/dev/types while `next dev` runs; prefer stable generated types for tsc.
 if [ -f .next/types/routes.d.ts ]; then

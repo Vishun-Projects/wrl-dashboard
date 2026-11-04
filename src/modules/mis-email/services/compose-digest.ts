@@ -487,6 +487,24 @@ export async function buildMisEmailPayload(
     ), (ctx) => `accountRows=${ctx.accountRows?.length ?? 0}`
   );
 
+  // Runtime lock: Regional must be the Branch rollup (catches accidental dual paths).
+  if (
+    bodyContext.branchPerformanceRows !== undefined &&
+    bodyContext.regionalPerformanceRows !== undefined
+  ) {
+    const fromBranches = rollupVisibleBranchesToRegional(bodyContext.branchPerformanceRows);
+    const regionalOpen = bodyContext.regionalPerformanceRows.reduce(
+      (s, r) => s + Number(r.open_calls || 0),
+      0
+    );
+    const rollupOpen = fromBranches.reduce((s, r) => s + Number(r.open_calls || 0), 0);
+    if (regionalOpen !== rollupOpen) {
+      throw new Error(
+        `MIS body Regional open (${regionalOpen}) !== Branch rollup open (${rollupOpen}) — refuse send/preview`
+      );
+    }
+  }
+
   const bodyLayout = resolveMisEmailBodyLayoutFromPrefs(prefs);
   const org = await getMisEmailOrgSettings({ fresh: true });
   const portalUrl = resolvePortalUrl(org.portalBaseUrl);
