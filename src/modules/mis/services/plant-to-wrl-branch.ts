@@ -9,21 +9,6 @@
 import type { BranchSummaryRow } from '@/lib/summary/derive';
 import { CLIENT_IMPORT_BRANCH_BY_OFFICE_ID } from '@/modules/mis/client-import/services/client-branch-map';
 
-export type WrlBranchMetricRow = {
-  branch: string;
-  region: string;
-  total_calls: number;
-  solved_calls: number;
-  cancelled_calls: number;
-  open_calls: number;
-  age_2: number;
-  age_3: number;
-  age_7: number;
-  age_15: number;
-  part_pending: number;
-  active_eng: number;
-};
-
 function isCrmTopLevelBranch(
   row: BranchSummaryRow,
   byId: Map<number, BranchSummaryRow>
@@ -44,53 +29,6 @@ function crmTopLevelBranch(
     cur = parent;
   }
   return cur;
-}
-
-/**
- * Roll every CRM office (incl. franchisees) into its WRL top-level parent.
- * Mail body must not use top-level-only rows — that drops franchisee solved
- * (South/East crash vs yesterday's zone sum of all offices).
- * Opens are replaced later by the Excel overlay.
- */
-export function rollupCrmOfficesToWrlBranches(
-  branchSummary: BranchSummaryRow[]
-): WrlBranchMetricRow[] {
-  const byId = new Map(branchSummary.map((b) => [b.officeId, b]));
-  const map = new Map<string, WrlBranchMetricRow>();
-  for (const row of branchSummary) {
-    const top = crmTopLevelBranch(row, byId);
-    const region = String(top.region || row.region || 'OTHER');
-    const key = `${region.toUpperCase()}::${top.branch}`;
-    let agg = map.get(key);
-    if (!agg) {
-      agg = {
-        branch: top.branch,
-        region,
-        total_calls: 0,
-        solved_calls: 0,
-        cancelled_calls: 0,
-        open_calls: 0,
-        age_2: 0,
-        age_3: 0,
-        age_7: 0,
-        age_15: 0,
-        part_pending: 0,
-        active_eng: 0,
-      };
-      map.set(key, agg);
-    }
-    agg.solved_calls += Number(row.solved_calls || 0);
-    agg.cancelled_calls += Number(row.cancelled_calls || 0);
-    agg.open_calls += Number(row.open_calls || 0);
-    agg.age_2 += Number(row.age_2 || 0);
-    agg.age_3 += Number(row.age_3 || 0);
-    agg.age_7 += Number(row.age_7 || 0);
-    agg.age_15 += Number(row.age_15 || 0);
-    agg.part_pending += Number(row.part_pending || 0);
-    agg.active_eng += Number(row.active_eng || 0);
-    agg.total_calls = agg.solved_calls + agg.cancelled_calls + agg.open_calls;
-  }
-  return [...map.values()];
 }
 
 function findSapCodeTopLevelBranch(
