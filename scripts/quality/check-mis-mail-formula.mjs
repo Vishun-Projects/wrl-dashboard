@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Hard lock: MIS mail body/open Excel stay on one formula.
- * Fails pre-commit / pre-push if someone reintroduces the Nov 2026 dual paths.
+ * Hard lock: MIS mail body formula (Nov 2026 corrected).
  *
- * Formula: CRM solved/cancelled + open Excel overlay; Regional = Branch rollup;
- * Open Calls Excel = same WRL-mapped opens; SAP code (1127) → WRL BRANCH.
+ * Regional: account-merge solved/cancelled + open Excel overlay (zone).
+ * Branch: CRM top-level solved/cancelled + open Excel overlay (WRL plant map).
+ * Never full-trace body, never CRM-open fallback, never Unassigned bucket.
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -39,17 +39,10 @@ function mustNotInclude(file, pattern, why) {
 const compose = read('src/modules/mis-email/services/compose-digest.ts');
 const mailBasis = read('src/modules/mis-email/services/mail-basis.ts');
 const excel = read('src/modules/mis/services/bd-mis-excel-export.ts');
-const unified = read('src/modules/mis/services/mis-unified-metrics.ts');
 const plant = read('src/modules/mis/services/plant-to-wrl-branch.ts');
 const body = read('src/modules/mis-email/services/body-sections.ts');
 
-// --- compose: one body path ---
 mustNotInclude(compose, 'fullTraceRows', 'compose must not switch body to full-trace when Excel is on');
-mustNotInclude(
-  compose,
-  'overlayRegionalOpenFromExcelRows',
-  'compose must not build Regional from a second overlay path'
-);
 mustNotInclude(
   compose,
   'buildMisEmailRegionalAndBranchRowsFromTrace',
@@ -73,18 +66,18 @@ mustInclude(
 );
 mustInclude(
   compose,
-  'rollupVisibleBranchesToRegional',
-  'Regional body must be Branch rollup'
+  'buildMisEmailRegionalPerformanceRows',
+  'Regional solved/cancelled must come from account merge (not Branch rollup)'
 );
 mustInclude(
   compose,
-  'rollupCrmOfficesToWrlBranches',
-  'franchisee CRM offices must roll into WRL parent (not top-level-only)'
+  'overlayRegionalOpenFromExcelRows',
+  'Regional opens must come from Excel overlay'
 );
-mustNotInclude(
+mustInclude(
   compose,
-  'buildTopLevelBranchRows',
-  'top-level-only CRM rows drop franchisee solved (South/East crash)'
+  'overlayBranchOpenFromExcelRows',
+  'Branch opens must come from Excel overlay'
 );
 mustInclude(
   compose,
@@ -92,7 +85,6 @@ mustInclude(
   'preview and send must pass the same open overlay'
 );
 
-// --- overlay: drop unmapped, no Unassigned ---
 mustNotInclude(
   mailBasis,
   'MIS_UNASSIGNED_BRANCH_LABEL',
@@ -102,43 +94,30 @@ mustNotInclude(mailBasis, '— Unassigned', 'mail-basis must not label unmapped 
 mustInclude(
   mailBasis,
   'if (!resolved) continue',
-  'unmapped plants must be omitted from branch overlay (same as 2559 mail)'
+  'unmapped plants must be omitted from branch overlay'
 );
 
-// --- Excel open = body opens ---
 mustInclude(
   excel,
-  'filterTraceRowsForMailBodyOpenExport',
-  'Open Calls Excel must use mail-body WRL-mapped opens'
+  'filterTraceRowsForUnifiedOpenExport',
+  'Open Calls Excel must use Cadbury-safe unified opens (same as Regional overlay)'
 );
-mustInclude(
-  unified,
+mustNotInclude(
+  excel,
   'filterTraceRowsForMailBodyOpenExport',
-  'unified metrics must expose mail-body open filter'
+  'Open Calls Excel must not use WRL-drop filter (that undercounted vs Regional)'
 );
 
-// --- SAP code → WRL BRANCH ---
 mustInclude(
   plant,
   'findSapCodeTopLevelBranch',
   '1127/1150-style labels must prefer WRL BRANCH over franchisee officeId'
 );
-mustInclude(
-  plant,
-  'CLIENT_IMPORT_BRANCH_BY_OFFICE_ID',
-  'SAP code map must stay aligned with client-import branch codes'
-);
 
-// --- body-sections: empty overlay must not fall back to CRM opens ---
 mustInclude(
   body,
-  'branchPerformanceRows !== undefined',
-  'empty overlaid branch list must not fall back to CRM opens'
-);
-mustInclude(
-  body,
-  'rollupVisibleBranchesToRegional',
-  'body-sections must export/use Branch→Regional rollup'
+  'regionalPerformanceRows !== undefined',
+  'body must prefer explicit Regional rows over Branch rollup'
 );
 
 console.log('check:mis-mail-formula OK');

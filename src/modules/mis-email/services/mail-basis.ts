@@ -4,7 +4,6 @@ import {
   bdMisSourcesFromSelection,
   buildBdMisRegionalRows,
   countTraceOpenCalls,
-  filterTraceRowsForMailBodyOpenExport,
   filterTraceRowsForSummaryExport,
   filterTraceRowsForUnifiedOpenExport,
   resolveTracePlantToWrlBranch,
@@ -301,8 +300,8 @@ export function countMisEmailOpenParity(
   const regional = buildMisEmailRegionalPerformanceRowsFromTrace(traceRows, branchSummary);
   const branch = buildMisEmailBranchPerformanceRowsFromTrace(traceRows, branchSummary);
   const detail = filterTraceRowsForSummaryExport(traceRows);
-  // Same open basis as WRL_BD_MIS_Open_Calls attachment (WRL-mapped opens).
-  const excelOpenRows = filterTraceRowsForMailBodyOpenExport(traceRows, branchSummary).filter(
+  // Same open basis as WRL_BD_MIS_Open_Calls / Regional overlay (unified Cadbury-safe).
+  const excelOpenRows = filterTraceRowsForUnifiedOpenExport(traceRows).filter(
     (row) => row.counts_toward === 'open'
   ).length;
   const regionalBodyOpen = regional.reduce((sum, row) => sum + row.open_calls, 0);

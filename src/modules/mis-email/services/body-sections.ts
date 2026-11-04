@@ -566,8 +566,11 @@ function regionalRowsForBody(
   data: SummaryDashboard,
   bodyContext: MisEmailBodyContext
 ): RegionalPerformanceRow[] {
-  // When branch rows were built for the digest, Regional must be their rollup
-  // so All ≡ sum(Branches) and no aging field can go negative from subtraction.
+  // Prefer explicit Regional (account-merge solved + open overlay). Do not replace
+  // with Branch rollup — that undercounted zone Total/Solved (SOUTH/EAST).
+  if (bodyContext.regionalPerformanceRows !== undefined) {
+    return resolveRegionalPerformanceRows(data, bodyContext);
+  }
   if (bodyContext.branchPerformanceRows !== undefined) {
     return rollupVisibleBranchesToRegional(bodyContext.branchPerformanceRows);
   }

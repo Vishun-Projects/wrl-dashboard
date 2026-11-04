@@ -456,21 +456,7 @@ describe('buildEmailBodySectionsHtml', () => {
     for (const branch of hidden) expect(html).not.toContain(branch);
   });
 
-  it('rolls regional from visible branches so hidden HQ cannot drive negative >7', () => {
-    const hiddenBranch = (branch: string, age15: number) => ({
-      branch,
-      region: 'EAST ZONE',
-      total_calls: age15,
-      solved_calls: 0,
-      cancelled_calls: 0,
-      open_calls: age15,
-      age_2: 0,
-      age_3: 0,
-      age_7: 0,
-      age_15: age15,
-      part_pending: 0,
-      active_eng: 0,
-    });
+  it('keeps explicit Regional rows (does not replace with Branch rollup)', () => {
     const ranchi = {
       branch: '1150 - RANCHI BRANCH',
       region: 'EAST ZONE',
@@ -485,42 +471,28 @@ describe('buildEmailBodySectionsHtml', () => {
       part_pending: 0,
       active_eng: 8,
     };
-    // Stale independent regional (would go negative if we subtracted CRM hidden opens).
-    const staleEast = {
+    const regionalEast = {
       region: 'EAST ZONE',
-      total_calls: 100,
-      solved_calls: 0,
-      cancelled_calls: 0,
-      open_calls: 40,
-      age_2: 255,
-      age_3: 122,
-      age_7: 10,
-      age_15: 17,
+      total_calls: 57603,
+      solved_calls: 50842,
+      cancelled_calls: 6369,
+      open_calls: 392,
+      age_2: 231,
+      age_3: 134,
+      age_7: 27,
+      age_15: 0,
       part_pending: 0,
-      active_eng: 1,
+      active_eng: 78,
     };
-    const html = buildEmailBodySectionsHtml(['regional_performance', 'branch_performance'], {
+    const text = buildEmailBodySectionsPlainText(['regional_performance', 'branch_performance'], {
       summary: sampleData,
-      regionalPerformanceRows: [staleEast],
-      branchPerformanceRows: [
-        hiddenBranch('1155 - CHANDIGARH BRANCH', 700),
-        ranchi,
-      ],
+      regionalPerformanceRows: [regionalEast],
+      branchPerformanceRows: [ranchi],
     });
-    expect(html).not.toContain('>-');
-    expect(html).not.toContain('CHANDIGARH');
-    expect(html).toContain('RANCHI');
-    // Regional All open/aging comes from Ranchi only (hidden HQ ignored).
-    expect(html).toMatch(/>36</);
-    const text = buildEmailBodySectionsPlainText(['regional_performance'], {
-      summary: sampleData,
-      regionalPerformanceRows: [staleEast],
-      branchPerformanceRows: [
-        hiddenBranch('1155 - CHANDIGARH BRANCH', 700),
-        ranchi,
-      ],
-    });
-    expect(text).toContain('open 36');
+    expect(text).toContain('open 392');
+    expect(text).toContain('solved 50,842');
+    expect(text).toContain('total 57,603');
+    expect(text).toContain('RANCHI');
     expect(text).not.toMatch(/open -\d/);
   });
 

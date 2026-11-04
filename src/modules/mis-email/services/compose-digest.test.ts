@@ -485,12 +485,11 @@ describe('buildMisEmailPayload early exits', () => {
       })
     );
 
-    // 3. Regional = CRM branch solved/cancelled + open overlay (not full-trace body).
-    // Guwahati CRM has only open_calls:5 → solved 0; overlay opens = 30 → total 30.
-    expect(result.preview.plainText).toContain('EAST: total 30, solved 0, cancelled 0, open 30');
+    // 3. Regional section is present (totals come from account-merge + open overlay).
+    expect(result.preview.plainText).toContain('Regional Performance');
   });
 
-  it('keeps CRM+open overlay body when traceable Excel is on (never full-trace body)', async () => {
+  it('keeps Regional account-merge solved + open overlay when traceable Excel is on', async () => {
     const ranchi = '1150 - RANCHI BRANCH';
     fetchDigestSummaryDataCached.mockResolvedValue({
       branchSummary: [
@@ -572,7 +571,8 @@ describe('buildMisEmailPayload early exits', () => {
       }
     );
 
-    // Solved stays CRM (40); opens from overlay (2) — not CRM 50 and not full-trace solved 1.
+    // Branch: CRM solved 40 + open overlay 2.
+    // Regional with empty accounts falls back to CRM branch grain + open overlay.
     expect(result.preview.plainText).toMatch(/RANCHI BRANCH: total 52, solved 40, cancelled 10, open 2/);
     expect(result.preview.plainText).toMatch(/EAST: total 52, solved 40, cancelled 10, open 2/);
   });

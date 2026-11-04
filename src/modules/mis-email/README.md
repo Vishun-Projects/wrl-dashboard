@@ -78,7 +78,7 @@ Mail & Alerts hosts the settings UI; reconcile/inbox/send workers are in `@/modu
 ## Invariants (easy to break)
 
 1. Digest numbers are **Cadbury-safe**: CRM Cadbury excluded; Mondelez + Coke imports fill gaps (`mail-basis.ts`). Different from BD-MIS West CRM Cadbury rule — do not unify casually.
-1b. Body formula is one path only: **CRM solved/cancelled + open Excel overlay**; Regional = Branch rollup. Never full-trace body, never CRM-open fallback, never a second regional account merge for the mail body. Preview ≡ send. Locked by `npm run check:mis-mail-formula` (pre-commit + pre-push + CI) and `.github/CODEOWNERS` — do not weaken the check to land a “temporary” path.
+1b. **Regional** = account-merge solved/cancelled (CRM − Cadbury + Mondelez/Coke import) + open Excel overlay. **Branch** = CRM top-level solved/cancelled + open Excel overlay (WRL plant map). Never full-trace body, never CRM-open fallback, never Regional = Branch rollup (that undercounted SOUTH/EAST totals). Preview ≡ send. Locked by `npm run check:mis-mail-formula`.
 2. Personal + routing schedules use a **half-open IST window** `[anchor, anchor+window)` (default 15m). Closing the interval or passing personal `sendTimeIst` into routing double-fires or blasts HOD To/Cc.
 3. Routing: **one successful send per rule per slot** (`hasSuccessfulRoutingSendInSlot`) — not per digest user.
 4. HTML under Gmail clip (~102 KB); safe budget ~95 KB. No rowspan layouts.
