@@ -104,4 +104,44 @@ describe('deriveSummaryDashboard main-branch rollup', () => {
     expect(branchSummary[0]?.solved_calls).toBe(1);
     expect(branchSummary[0]?.open_calls).toBe(1);
   });
+
+  it('keeps Cadbury CRM on account but off branch (export/unified parity)', () => {
+    const calls = [
+      {
+        nofficeid: 1150,
+        office_under: 0,
+        branch_name: '1150 - RANCHI BRANCH',
+        resolved_branch_code: '1150',
+        resolved_branch_name: '1150 - RANCHI BRANCH',
+        region: 'EAST ZONE',
+        account: 'Cadbury',
+        vtrnno: 'CAD-1',
+        calltype: 'BREAKDOWN',
+        callsdtrndate: '2026-01-01',
+        status_bucket: 'assigned',
+      },
+      {
+        nofficeid: 1150,
+        office_under: 0,
+        branch_name: '1150 - RANCHI BRANCH',
+        resolved_branch_code: '1150',
+        resolved_branch_name: '1150 - RANCHI BRANCH',
+        region: 'EAST ZONE',
+        account: 'Nestle',
+        vtrnno: 'NES-1',
+        calltype: 'BREAKDOWN',
+        callsdtrndate: '2026-06-20',
+        status_bucket: 'assigned',
+      },
+    ];
+
+    const { branchSummary, accountSummary } = deriveSummaryDashboard(calls, {
+      agingAsOf: '2026-07-09',
+    });
+
+    expect(branchSummary[0]?.open_calls).toBe(1);
+    expect((branchSummary[0]?.age_7 ?? 0) + (branchSummary[0]?.age_15 ?? 0)).toBe(1);
+    expect(accountSummary.find((a) => a.account === 'Cadbury')?.open_calls).toBe(1);
+    expect(accountSummary.find((a) => a.account === 'Nestle')?.open_calls).toBe(1);
+  });
 });

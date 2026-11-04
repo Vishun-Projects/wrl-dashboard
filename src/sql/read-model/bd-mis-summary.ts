@@ -6,7 +6,10 @@ import {
   ensureNormalizeCallTypeFunction,
   type SummaryQueryParams,
 } from '@/sql/read-model/summary';
-import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/sql/read-model/summary-call-filters';
+import {
+  SUMMARY_EXCLUDE_IMPORT_REPLACED_ACCOUNT_SQL,
+  SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL,
+} from '@/sql/read-model/summary-call-filters';
 import {
   HOT_OFFICE_JOINS_SQL,
   HOT_RESOLVED_REGION_SQL,
@@ -159,6 +162,7 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
       ${officeFilter.clause}
       ${callTypeFilter.clause}
       ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
+      ${SUMMARY_EXCLUDE_IMPORT_REPLACED_ACCOUNT_SQL}
     GROUP BY h.nofficeid, d.nunder, d.vcompanyname, h.branch_name, ${BD_MIS_REGION_SQL}
     ORDER BY branch ASC
     `,
@@ -200,6 +204,7 @@ export async function queryBdMisCrmSummary(params: SummaryQueryParams): Promise<
       ${agingOfficeFilter.clause}
       ${agingCallTypeFilter.clause}
       ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
+      ${SUMMARY_EXCLUDE_IMPORT_REPLACED_ACCOUNT_SQL}
     GROUP BY h.nofficeid
     `,
     ...agingValues

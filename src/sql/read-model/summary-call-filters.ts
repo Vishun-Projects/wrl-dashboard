@@ -17,3 +17,18 @@ export function isPracticeWinmaxOfficeName(name: string | undefined | null): boo
   if (!name) return false;
   return /practice|winmax|western\s+head\s+office\s*-\s*1100/i.test(name.trim());
 }
+
+/**
+ * Cadbury/Mondelez + Coke/HCCB are import-replaced in unified MIS (open export /
+ * account merge). Keep them on Key Account CRM rows; strip from branch rollups
+ * so Branch-wise open/>7 cannot exceed Regional (Ranchi Cadbury dump).
+ */
+export function isImportReplacedCrmAccount(account: string | undefined | null): boolean {
+  const key = String(account ?? '')
+    .trim()
+    .toLowerCase();
+  return key === 'cadbury' || key === 'mondelez' || key === 'coke' || key === 'hccb';
+}
+
+/** Branch SQL only — do not apply to account summary queries. */
+export const SUMMARY_EXCLUDE_IMPORT_REPLACED_ACCOUNT_SQL = `AND lower(trim(coalesce(h.account, ''))) NOT IN ('cadbury', 'mondelez', 'coke', 'hccb')`;

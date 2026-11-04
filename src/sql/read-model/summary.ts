@@ -7,7 +7,10 @@ import {
   monthStartIst,
   todayIst,
 } from '@/lib/dates/local-date';
-import { SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL } from '@/sql/read-model/summary-call-filters';
+import {
+  SUMMARY_EXCLUDE_IMPORT_REPLACED_ACCOUNT_SQL,
+  SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL,
+} from '@/sql/read-model/summary-call-filters';
 import { AGING_BUCKET_SQL, openCallsFromAging } from '@/lib/aging/buckets';
 import {
   HOT_MAIN_BRANCH_NAME_SQL,
@@ -198,6 +201,7 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
       ${officeFilter.clause}
       ${callTypeFilter.clause}
       ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
+      ${SUMMARY_EXCLUDE_IMPORT_REPLACED_ACCOUNT_SQL}
     GROUP BY ${HOT_MAIN_BRANCH_OFFICE_ID_SQL}, ${HOT_MAIN_BRANCH_NAME_SQL}, ${HOT_RESOLVED_REGION_SQL}
     ORDER BY branch ASC
     `,
@@ -240,6 +244,7 @@ export async function querySummaryDashboard(params: SummaryQueryParams): Promise
       ${agingOfficeFilter.clause}
       ${agingCallTypeFilter.clause}
       ${SUMMARY_EXCLUDE_PRACTICE_OFFICE_SQL}
+      ${SUMMARY_EXCLUDE_IMPORT_REPLACED_ACCOUNT_SQL}
     GROUP BY ${HOT_MAIN_BRANCH_OFFICE_ID_SQL}
     `,
     ...agingValues

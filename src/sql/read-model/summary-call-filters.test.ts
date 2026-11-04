@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { isPracticeWinmaxOfficeName } from '@/sql/read-model/summary-call-filters';
+import {
+  isImportReplacedCrmAccount,
+  isPracticeWinmaxOfficeName,
+} from '@/sql/read-model/summary-call-filters';
 
 describe('isPracticeWinmaxOfficeName', () => {
   it('flags WinMax practice offices', () => {
@@ -15,5 +18,19 @@ describe('isPracticeWinmaxOfficeName', () => {
   it('allows normal franchisee offices', () => {
     expect(isPracticeWinmaxOfficeName('SIDDHIVINAYAK REFRIGERATION')).toBe(false);
     expect(isPracticeWinmaxOfficeName('1171 - MUMBAI BRANCH')).toBe(false);
+  });
+});
+
+describe('isImportReplacedCrmAccount', () => {
+  it('flags Cadbury/Mondelez and Coke/HCCB', () => {
+    expect(isImportReplacedCrmAccount('Cadbury')).toBe(true);
+    expect(isImportReplacedCrmAccount('MONDELEZ')).toBe(true);
+    expect(isImportReplacedCrmAccount('Coke')).toBe(true);
+    expect(isImportReplacedCrmAccount('HCCB')).toBe(true);
+  });
+
+  it('keeps normal CRM accounts on branch', () => {
+    expect(isImportReplacedCrmAccount('Nestle')).toBe(false);
+    expect(isImportReplacedCrmAccount('Pepsi')).toBe(false);
   });
 });

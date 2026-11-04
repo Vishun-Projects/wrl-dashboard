@@ -7,6 +7,7 @@ import {
   buildMisEmailRegionalPerformanceRows,
   buildMisEmailRegionalPerformanceRowsFromTrace,
   misEmailBdMisSources,
+  overlayBranchOpenFromExcelRows,
   overlayRegionalOpenFromExcelRows,
   reconcileMisEmailOpenCounts,
 } from '@/modules/mis-email/services/mail-basis';
@@ -324,6 +325,80 @@ describe('digest body trace basis', () => {
     // Open-only trace has open rows only — body must keep BdMis solved/cancelled (hybrid), not trace-only.
     expect(fromSummaryOverlay[0]?.solved_calls).toBe(0);
     expect(fromSummaryOverlay[0]?.solved_calls).not.toBe(fromTrace[0]?.solved_calls);
+  });
+});
+
+describe('overlayBranchOpenFromExcelRows', () => {
+  it('strips CRM Cadbury inflation so Ranchi >7 cannot exceed unified open aging', () => {
+    const ranchi = '1150 - RANCHI BRANCH';
+    const branchSummary: BranchSummaryRow[] = [
+      {
+        ...branch('EAST ZONE', 555),
+        officeId: 1150,
+        branch: ranchi,
+        open_calls: 590,
+        age_2: 19,
+        age_3: 16,
+        age_7: 1,
+        age_15: 554,
+      },
+    ];
+    const crmBranch = [
+      {
+        branch: ranchi,
+        region: 'EAST ZONE',
+        total_calls: 5821,
+        solved_calls: 3950,
+        cancelled_calls: 1281,
+        open_calls: 590,
+        age_2: 19,
+        age_3: 16,
+        age_7: 1,
+        age_15: 554,
+        part_pending: 0,
+        active_eng: 0,
+      },
+    ];
+    const traceRows = buildBdMisTraceRows({
+      crmRows: [
+        {
+          region: 'EAST ZONE',
+          plant: ranchi,
+          technician_name: 'Cadbury Tech',
+          office_under_branch: ranchi,
+          customer_name: 'Cadbury Plant',
+          logged_at: '2026-01-01T00:00:00Z',
+          service_order: 'CAD-OLD-1',
+          client: 'Cadbury',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Cadbury',
+        },
+        {
+          region: 'EAST ZONE',
+          plant: ranchi,
+          technician_name: 'Nestle Tech',
+          office_under_branch: ranchi,
+          customer_name: 'Nestle Site',
+          logged_at: '2026-06-20T00:00:00Z',
+          service_order: 'NES-1',
+          client: 'Nestle',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+      ],
+      clientRows: [],
+      sources: misEmailBdMisSources(),
+      agingDate: '2026-07-09',
+    });
+
+    const overlaid = overlayBranchOpenFromExcelRows(crmBranch, traceRows, branchSummary);
+    expect(overlaid[0]?.open_calls).toBe(1);
+    expect((overlaid[0]?.age_7 ?? 0) + (overlaid[0]?.age_15 ?? 0)).toBe(1);
+    expect(overlaid[0]?.open_calls).toBeLessThan(crmBranch[0]!.open_calls);
   });
 });
 

@@ -9,6 +9,7 @@ import {
   resolveMainBranchDisplayName,
   resolveMainBranchOfficeId,
 } from '@/sql/read-model/main-branch-resolve';
+import { isImportReplacedCrmAccount } from '@/sql/read-model/summary-call-filters';
 import { incrementAgingBucket, openCallsFromAging } from '@/lib/aging/buckets';
 
 export type BranchSummaryRow = {
@@ -327,27 +328,32 @@ export function deriveSummaryDashboard(
     if (branchLabel !== 'UNKNOWN' && (b.branch === 'UNKNOWN' || b.branch === '')) {
       b.branch = branchLabel;
     }
-    b.population += 1;
-    b.total_calls += 1;
-    if (solved) b.solved_calls += 1;
-    if (isFastClose(row)) b.all_tech_solved += 1;
-    if (isBd && isFastClose(row)) b.tech_solved_calls += 1;
-    if (cancelled) b.cancelled_calls += 1;
-    if (open) b.open_calls += 1;
-    if (open && dayDiff != null) {
-      incrementAgingBucket(b, dayDiff);
-    }
-    if (partPending) b.part_pending += 1;
+    // Same strip as open-calls export / Regional account merge: Cadbury+Coke stay
+    // on accountSummary only so Branch-wise matches export (not CRM dump under Ranchi).
+    const countOnBranch = !isImportReplacedCrmAccount(account);
+    if (countOnBranch) {
+      b.population += 1;
+      b.total_calls += 1;
+      if (solved) b.solved_calls += 1;
+      if (isFastClose(row)) b.all_tech_solved += 1;
+      if (isBd && isFastClose(row)) b.tech_solved_calls += 1;
+      if (cancelled) b.cancelled_calls += 1;
+      if (open) b.open_calls += 1;
+      if (open && dayDiff != null) {
+        incrementAgingBucket(b, dayDiff);
+      }
+      if (partPending) b.part_pending += 1;
 
-    if (isDep) {
-      b.deployment_total += 1;
-      if (solved) b.deployment_done += 1;
+      if (isDep) {
+        b.deployment_total += 1;
+        if (solved) b.deployment_done += 1;
+      }
+      if (isIns) {
+        b.installation_total += 1;
+        if (solved) b.installation_done += 1;
+      }
+      if (technician) b.active_eng_names.add(technician);
     }
-    if (isIns) {
-      b.installation_total += 1;
-      if (solved) b.installation_done += 1;
-    }
-    if (technician) b.active_eng_names.add(technician);
 
     const accountKey = `${region}-${account}`;
     if (!accountMap.has(accountKey)) {

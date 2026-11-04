@@ -521,34 +521,55 @@ function rawBranchPerformanceRows(
     });
 }
 
-/** Drop hidden-branch metrics from zone rows. All is summed from those zones. */
-function omitHiddenBranchCounts(
-  regional: RegionalPerformanceRow[],
+/**
+ * Regional body = rollup of the same visible branch rows shown below.
+ * Do not subtract CRM hidden-branch totals from Excel-overlaid zone opens —
+ * that mismatched bases and produced negative >7 (EAST).
+ */
+function rollupVisibleBranchesToRegional(
   branches: BranchPerformanceRow[]
 ): RegionalPerformanceRow[] {
-  const hidden = branches.filter((row) => isMailBodyHiddenBranch(row.branch));
-  if (!hidden.length) return regional;
-  return regional.map((zone) => {
-    const key = regionMatchKey(zone.region);
-    const cuts = hidden.filter((row) => regionMatchKey(row.region) === key);
-    if (!cuts.length) return zone;
-    const next = { ...zone };
-    for (const field of BRANCH_COUNT_FIELDS) {
-      const cut = cuts.reduce((sum, row) => sum + Number(row[field] || 0), 0);
-      next[field] = Math.max(0, Number(zone[field] || 0) - cut);
+  const map = new Map<string, RegionalPerformanceRow>();
+  for (const row of branches) {
+    if (isMailBodyHiddenBranch(row.branch) || !isNonZeroBranchPerformanceRow(row)) continue;
+    const region = String(row.region ?? 'OTHER');
+    const key = regionMatchKey(region);
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, {
+        region,
+        total_calls: Number(row.total_calls || 0),
+        solved_calls: Number(row.solved_calls || 0),
+        cancelled_calls: Number(row.cancelled_calls || 0),
+        open_calls: Number(row.open_calls || 0),
+        age_2: Number(row.age_2 || 0),
+        age_3: Number(row.age_3 || 0),
+        age_7: Number(row.age_7 || 0),
+        age_15: Number(row.age_15 || 0),
+        part_pending: Number(row.part_pending || 0),
+        active_eng: Number(row.active_eng || 0),
+      });
+      continue;
     }
-    return next;
-  });
+    for (const field of BRANCH_COUNT_FIELDS) {
+      prev[field] = Number(prev[field] || 0) + Number(row[field] || 0);
+    }
+  }
+  return [...map.values()].sort((a, b) =>
+    regionMatchKey(a.region).localeCompare(regionMatchKey(b.region))
+  );
 }
 
 function regionalRowsForBody(
   data: SummaryDashboard,
   bodyContext: MisEmailBodyContext
 ): RegionalPerformanceRow[] {
-  return omitHiddenBranchCounts(
-    resolveRegionalPerformanceRows(data, bodyContext),
-    rawBranchPerformanceRows(data, bodyContext)
-  );
+  // When branch rows were built for the digest, Regional must be their rollup
+  // so All ≡ sum(Branches) and no aging field can go negative from subtraction.
+  if (bodyContext.branchPerformanceRows?.length) {
+    return rollupVisibleBranchesToRegional(bodyContext.branchPerformanceRows);
+  }
+  return resolveRegionalPerformanceRows(data, bodyContext);
 }
 
 function resolveBranchPerformanceRows(

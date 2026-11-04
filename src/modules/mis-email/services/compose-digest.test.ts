@@ -196,6 +196,64 @@ describe('buildMisEmailPayload early exits', () => {
     expect(fetchDigestRegisterRows).not.toHaveBeenCalled();
   });
 
+  it('send with branch body overlays opens even when open/trace Excel attachments are off', async () => {
+    fetchDigestSummaryDataCached.mockResolvedValue({
+      branchSummary: [
+        {
+          officeId: 1150,
+          parentId: 0,
+          branch: '1150 - RANCHI BRANCH',
+          region: 'EAST ZONE',
+          total_calls: 100,
+          solved_calls: 10,
+          cancelled_calls: 0,
+          open_calls: 90,
+          age_2: 0,
+          age_3: 0,
+          age_7: 0,
+          age_15: 90,
+          part_pending: 0,
+          active_eng: 1,
+        },
+      ],
+      accountSummary: [],
+      totals: {},
+    });
+    fetchDigestClientAccountSummaryCached.mockResolvedValue([]);
+    buildDigestTraceableExportPayloadCached.mockResolvedValue({
+      regionalRows: [],
+      grand: { region: 'ALL', open_calls: 0 },
+      crmBranchSummary: [],
+      crmAccountSummary: [],
+      clientAccountSummary: [],
+      sources: {},
+      traceRows: [],
+      traceAlign: 'summary',
+      filterMeta: {},
+    });
+    buildDigestAttachments.mockResolvedValue([]);
+
+    await buildMisEmailPayload(
+      {
+        ...summaryRecipient,
+        includeDetailed: false,
+        mis_email_preferences: {
+          ...summaryRecipient.mis_email_preferences,
+          includeDetailed: false,
+          includeTraceableExport: false,
+          includeOpenCallsExport: false,
+          bodyInEmail: ['regional_performance', 'branch_performance'],
+        },
+      } as never,
+      {
+        sentTo: 'user@example.com',
+        displayName: 'User',
+      }
+    );
+
+    expect(buildDigestTraceableExportPayloadCached).toHaveBeenCalledOnce();
+  });
+
   it('forPreview uses summary counts only and skips Excel, register, and call-level trace', async () => {
     fetchDigestSummaryDataCached.mockResolvedValue({
       branchSummary: [],

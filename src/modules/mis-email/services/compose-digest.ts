@@ -440,13 +440,16 @@ export async function buildMisEmailPayload(
   }
 
   // Preview: summary dashboard counts only (no call-level corpus).
-  // Send: overlay opens from Excel/trace when those attachments are on.
+  // Send: always overlay open/aging from the unified open corpus when the body
+  // shows regional or branch tables. Branch CRM rollup still includes Cadbury
+  // CRM opens; regional uses account-aligned merge that strips them. Without
+  // this overlay, Ranchi-style branch >7 can exceed the whole EAST zone.
+  // (Do not gate on Excel attachments — company digests often have those off.)
   const needsFullTraceCorpus = includeTraceableExport;
   const needsOpenOverlay =
     !options.forPreview &&
     (bodySectionIds.includes('regional_performance') ||
-      bodySectionIds.includes('branch_performance')) &&
-    (includeOpenCallsExport || includeTraceableExport);
+      bodySectionIds.includes('branch_performance'));
   const needsTracePayload =
     !options.forPreview &&
     (includeTraceableExport || includeOpenCallsExport || needsOpenOverlay);

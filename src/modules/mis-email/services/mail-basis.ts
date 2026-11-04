@@ -120,23 +120,27 @@ export function overlayBranchOpenFromExcelRows(
   traceRows: BdMisTraceRow[],
   branchSummary?: BranchSummaryRow[]
 ): BranchPerformanceRow[] {
-  const byKey = new Map<string, OpenAgingAgg>();
+  type Agg = OpenAgingAgg & { region: string; branch: string };
+  const byKey = new Map<string, Agg>();
   for (const row of filterTraceRowsForUnifiedOpenExport(traceRows)) {
     if (row.counts_toward !== 'open') continue;
     const region = String(row.region ?? 'OTHER').toUpperCase();
     const resolved = resolveTracePlantToWrlBranch(row.plant ?? '', region, branchSummary);
     if (!resolved) continue;
-    const key = `${String(resolved.region).toUpperCase()}::${resolved.branch}`;
+    const branchRegion = String(resolved.region).toUpperCase();
+    const key = `${branchRegion}::${resolved.branch}`;
     let agg = byKey.get(key);
     if (!agg) {
-      agg = emptyOpenAging();
+      agg = { ...emptyOpenAging(), region: branchRegion, branch: resolved.branch };
       byKey.set(key, agg);
     }
     accumulateOpenAging(agg, row);
   }
 
-  return summaryBranch.map((row) => {
+  const used = new Set<string>();
+  const overlaid = summaryBranch.map((row) => {
     const key = `${String(row.region ?? '').toUpperCase()}::${row.branch}`;
+    used.add(key);
     const open = byKey.get(key) ?? emptyOpenAging();
     return {
       ...row,
@@ -149,6 +153,26 @@ export function overlayBranchOpenFromExcelRows(
       total_calls: row.solved_calls + row.cancelled_calls + open.open_calls,
     };
   });
+
+  // Opens whose plant maps to a label not already in CRM top-level rows.
+  for (const [key, open] of byKey) {
+    if (used.has(key) || open.open_calls <= 0) continue;
+    overlaid.push({
+      branch: open.branch,
+      region: open.region,
+      total_calls: open.open_calls,
+      solved_calls: 0,
+      cancelled_calls: 0,
+      open_calls: open.open_calls,
+      age_2: open.age_2,
+      age_3: open.age_3,
+      age_7: open.age_7,
+      age_15: open.age_15,
+      part_pending: 0,
+      active_eng: open.engineers.size,
+    });
+  }
+  return overlaid;
 }
 
 function branchPerformanceKey(region: unknown, branch: unknown): string {

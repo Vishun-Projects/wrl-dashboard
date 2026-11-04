@@ -456,84 +456,72 @@ describe('buildEmailBodySectionsHtml', () => {
     for (const branch of hidden) expect(html).not.toContain(branch);
   });
 
-  it('drops hidden branch counts from the zone and All totals', () => {
-    const north = {
-      region: 'NORTH ZONE',
-      total_calls: 3,
+  it('rolls regional from visible branches so hidden HQ cannot drive negative >7', () => {
+    const hiddenBranch = (branch: string, age15: number) => ({
+      branch,
+      region: 'EAST ZONE',
+      total_calls: age15,
       solved_calls: 0,
-      cancelled_calls: 3,
-      open_calls: 0,
+      cancelled_calls: 0,
+      open_calls: age15,
       age_2: 0,
       age_3: 0,
       age_7: 0,
-      age_15: 0,
+      age_15: age15,
       part_pending: 0,
       active_eng: 0,
-    };
-    const west = {
-      region: 'WEST ZONE',
-      total_calls: 10,
-      solved_calls: 8,
+    });
+    const ranchi = {
+      branch: '1150 - RANCHI BRANCH',
+      region: 'EAST ZONE',
+      total_calls: 36,
+      solved_calls: 0,
       cancelled_calls: 0,
-      open_calls: 2,
-      age_2: 2,
-      age_3: 0,
-      age_7: 0,
+      open_calls: 36,
+      age_2: 19,
+      age_3: 16,
+      age_7: 1,
       age_15: 0,
+      part_pending: 0,
+      active_eng: 8,
+    };
+    // Stale independent regional (would go negative if we subtracted CRM hidden opens).
+    const staleEast = {
+      region: 'EAST ZONE',
+      total_calls: 100,
+      solved_calls: 0,
+      cancelled_calls: 0,
+      open_calls: 40,
+      age_2: 255,
+      age_3: 122,
+      age_7: 10,
+      age_15: 17,
       part_pending: 0,
       active_eng: 1,
     };
-    const hiddenBranch = (branch: string, cancelled: number) => ({
-      branch,
-      region: 'NORTH ZONE',
-      total_calls: cancelled,
-      solved_calls: 0,
-      cancelled_calls: cancelled,
-      open_calls: 0,
-      age_2: 0,
-      age_3: 0,
-      age_7: 0,
-      age_15: 0,
-      part_pending: 0,
-      active_eng: 0,
-    });
-    const html = buildEmailBodySectionsHtml(['regional_performance'], {
+    const html = buildEmailBodySectionsHtml(['regional_performance', 'branch_performance'], {
       summary: sampleData,
-      regionalPerformanceRows: [north, west],
+      regionalPerformanceRows: [staleEast],
       branchPerformanceRows: [
-        hiddenBranch('1155 - CHANDIGARH BRANCH', 1),
-        hiddenBranch('AGRA BRANCH - 1160', 1),
-        hiddenBranch('WRL GUJRAT BRANCH OFFICE', 1),
-        {
-          branch: 'Pune',
-          region: 'WEST ZONE',
-          total_calls: 10,
-          solved_calls: 8,
-          cancelled_calls: 0,
-          open_calls: 2,
-          age_2: 2,
-          age_3: 0,
-          age_7: 0,
-          age_15: 0,
-          part_pending: 0,
-          active_eng: 1,
-        },
+        hiddenBranch('1155 - CHANDIGARH BRANCH', 700),
+        ranchi,
       ],
     });
-    // North 3 cancelled removed; All is West only (solved 8 + open 2).
-    expect(html).not.toContain('>12<');
-    expect(html).toContain('>10<');
+    expect(html).not.toContain('>-');
+    expect(html).not.toContain('CHANDIGARH');
+    expect(html).toContain('RANCHI');
+    // Regional All open/aging comes from Ranchi only (hidden HQ ignored).
+    expect(html).toMatch(/>36</);
     const text = buildEmailBodySectionsPlainText(['regional_performance'], {
       summary: sampleData,
-      regionalPerformanceRows: [north, west],
+      regionalPerformanceRows: [staleEast],
       branchPerformanceRows: [
-        hiddenBranch('1155 - CHANDIGARH BRANCH', 1),
-        hiddenBranch('AGRA BRANCH - 1160', 1),
-        hiddenBranch('WRL GUJRAT BRANCH OFFICE', 1),
+        hiddenBranch('1155 - CHANDIGARH BRANCH', 700),
+        ranchi,
       ],
     });
-    expect(text).toContain('NORTH: total 0');
-    expect(text).toContain('All: total 10');
+    expect(text).toContain('open 36');
+    expect(text).not.toMatch(/open -\d/);
   });
 
   it('sorts key account rows NORTH → EAST → WEST → SOUTH, then account name', () => {
