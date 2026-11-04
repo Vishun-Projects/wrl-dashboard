@@ -2,7 +2,6 @@ import { buildDigestAttachments, resolveDigestAttachmentFilenames, type EmailAtt
 import {
   buildEmailBodySectionsHtml,
   buildEmailBodySectionsPlainText,
-  buildTopLevelBranchRows,
   countKeyAccountBodyRows,
   resolveDigestBodySections,
   rollupVisibleBranchesToRegional,
@@ -15,7 +14,7 @@ import {
   overlayBranchOpenFromExcelRows,
   reconcileMisEmailOpenCounts,
 } from '@/modules/mis-email/services/mail-basis';
-import { mergeBranchSummaryRowsByName, type BdMisTraceRow } from '@/modules/mis';
+import { rollupCrmOfficesToWrlBranches, type BdMisTraceRow } from '@/modules/mis';
 import type { BranchPerformanceRow } from '@/modules/mis-email/services/mail-types';
 import {
   fetchDigestRegisterRows,
@@ -157,30 +156,17 @@ async function buildMisEmailBodyContext(
     context.clientAccountSummary = clientRows as Array<Record<string, unknown>>;
   }
 
-  // One formula (preview ≡ send ≡ company morning): CRM branch totals for
-  // solved/cancelled, open/aging from unified Excel overlay, Regional = Branch rollup.
+  // One formula: every CRM office rolled into WRL parent (franchisee solved kept),
+  // open/aging from Excel overlay, Regional = Branch rollup.
   if (needsRegionalBody || needsBranchBody) {
     if (openTraceRows === undefined) {
       throw new Error(
         'MIS regional/branch body requires open-calls corpus — refusing CRM-open fallback'
       );
     }
-    const crmBranch: BranchPerformanceRow[] = mergeBranchSummaryRowsByName(
-      buildTopLevelBranchRows(data.branchSummary)
-    ).map((row) => ({
-      branch: row.branch,
-      region: row.region,
-      total_calls: row.total_calls,
-      solved_calls: row.solved_calls,
-      cancelled_calls: row.cancelled_calls,
-      open_calls: row.open_calls,
-      age_2: row.age_2,
-      age_3: row.age_3,
-      age_7: row.age_7,
-      age_15: row.age_15,
-      part_pending: row.part_pending,
-      active_eng: row.active_eng,
-    }));
+    const crmBranch: BranchPerformanceRow[] = rollupCrmOfficesToWrlBranches(
+      data.branchSummary
+    );
     const branch = overlayBranchOpenFromExcelRows(
       crmBranch,
       openTraceRows,

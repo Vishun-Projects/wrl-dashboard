@@ -1,5 +1,6 @@
-# MIS mail formula lock (Nov 2026) — do not change these without owner review.
-# In GitHub → Settings → Branches → require review from Code Owners on main.
+# MIS mail formula only (not whole repo). Path push-block via ruleset, not
+# "require PR on main" — other files can still push direct.
+# Settings → Rules → Rulesets → restrict these paths (bypass: you).
 src/modules/mis-email/services/compose-digest.ts @Vishun-Projects
 src/modules/mis-email/services/mail-basis.ts @Vishun-Projects
 src/modules/mis-email/services/body-sections.ts @Vishun-Projects

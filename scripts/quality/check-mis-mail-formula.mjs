@@ -78,6 +78,16 @@ mustInclude(
 );
 mustInclude(
   compose,
+  'rollupCrmOfficesToWrlBranches',
+  'franchisee CRM offices must roll into WRL parent (not top-level-only)'
+);
+mustNotInclude(
+  compose,
+  'buildTopLevelBranchRows',
+  'top-level-only CRM rows drop franchisee solved (South/East crash)'
+);
+mustInclude(
+  compose,
   'openTraceRows: needsOpenOverlay',
   'preview and send must pass the same open overlay'
 );

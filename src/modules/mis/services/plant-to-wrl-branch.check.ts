@@ -3,7 +3,10 @@
  * Run: npx tsx src/modules/mis/services/plant-to-wrl-branch.check.ts
  */
 import type { BranchSummaryRow } from '@/lib/summary/derive';
-import { resolveTracePlantToWrlBranch } from '@/modules/mis/services/plant-to-wrl-branch';
+import {
+  resolveTracePlantToWrlBranch,
+  rollupCrmOfficesToWrlBranches,
+} from '@/modules/mis/services/plant-to-wrl-branch';
 
 function branch(
   officeId: number,
@@ -81,6 +84,18 @@ assert(
 assert(
   resolveTracePlantToWrlBranch('UNKNOWN PLANT', 'EAST ZONE', tree) === null,
   'unmapped plants stay null (no Unassigned bucket)'
+);
+
+const rolled = rollupCrmOfficesToWrlBranches([
+  { ...branch(32, 612, '1182 - PATNA BRANCH'), solved_calls: 10, cancelled_calls: 1, open_calls: 2, total_calls: 13 },
+  { ...branch(1127, 32, 'POWER REFRIGERATION'), solved_calls: 40, cancelled_calls: 0, open_calls: 5, total_calls: 45 },
+  { ...branch(11, 612, '1127 - GUWAHATI BRANCH'), solved_calls: 7, cancelled_calls: 0, open_calls: 1, total_calls: 8 },
+]);
+const patna = rolled.find((r) => r.branch === '1182 - PATNA BRANCH');
+assert(patna?.solved_calls === 50, 'franchisee solved must roll into Patna parent');
+assert(
+  rolled.find((r) => r.branch === '1127 - GUWAHATI BRANCH')?.solved_calls === 7,
+  'Guwahati keeps its own solved'
 );
 
 console.log('plant-to-wrl-branch.check: ok');
