@@ -254,7 +254,7 @@ describe('buildMisEmailPayload early exits', () => {
     expect(buildDigestTraceableExportPayloadCached).toHaveBeenCalledOnce();
   });
 
-  it('forPreview uses summary counts only and skips Excel, register, and call-level trace', async () => {
+  it('forPreview overlays opens like send but still skips Excel and register', async () => {
     fetchDigestSummaryDataCached.mockResolvedValue({
       branchSummary: [],
       accountSummary: [],
@@ -294,7 +294,14 @@ describe('buildMisEmailPayload early exits', () => {
     expect(fetchDigestSummaryDataCached).toHaveBeenCalledOnce();
     expect(fetchDigestRegisterRows).not.toHaveBeenCalled();
     expect(buildDigestAttachments).not.toHaveBeenCalled();
-    expect(buildDigestTraceableExportPayloadCached).not.toHaveBeenCalled();
+    expect(buildDigestTraceableExportPayloadCached).toHaveBeenCalledOnce();
+    expect(buildDigestTraceableExportPayloadCached).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ requireFullCorpus: false })
+    );
   });
 
   it('does not filter excel data/trace payload by selected accounts but filters body keyAccountRows', async () => {
@@ -478,9 +485,96 @@ describe('buildMisEmailPayload early exits', () => {
       })
     );
 
-    // 3. Assert that the rest of the body (e.g. regionalPerformanceRows) shows overall/unfiltered ones
-    // We expect the html/plaintext to contain regional/overall stats including all open calls (30 calls total)
-    expect(result.preview.plainText).toContain('EAST: total 40, solved 10, cancelled 0, open 30');
+    // 3. Regional = CRM branch solved/cancelled + open overlay (not full-trace body).
+    // Guwahati CRM has only open_calls:5 → solved 0; overlay opens = 30 → total 30.
+    expect(result.preview.plainText).toContain('EAST: total 30, solved 0, cancelled 0, open 30');
+  });
+
+  it('keeps CRM+open overlay body when traceable Excel is on (never full-trace body)', async () => {
+    const ranchi = '1150 - RANCHI BRANCH';
+    fetchDigestSummaryDataCached.mockResolvedValue({
+      branchSummary: [
+        {
+          officeId: 1150,
+          parentId: 0,
+          branch: ranchi,
+          region: 'EAST ZONE',
+          total_calls: 100,
+          solved_calls: 40,
+          cancelled_calls: 10,
+          open_calls: 50,
+          age_2: 0,
+          age_3: 0,
+          age_7: 0,
+          age_15: 50,
+          part_pending: 0,
+          active_eng: 1,
+        },
+      ],
+      accountSummary: [],
+      totals: {},
+    });
+    fetchDigestClientAccountSummaryCached.mockResolvedValue([]);
+    buildDigestTraceableExportPayloadCached.mockResolvedValue({
+      regionalRows: [],
+      grand: { region: 'ALL', open_calls: 2 },
+      crmBranchSummary: [],
+      crmAccountSummary: [],
+      clientAccountSummary: [],
+      sources: {},
+      traceRows: [
+        {
+          client: 'Nestle',
+          region: 'EAST ZONE',
+          plant: ranchi,
+          counts_toward: 'open',
+          included_in_final_count: true,
+          aging: '>15 days',
+        },
+        {
+          client: 'Nestle',
+          region: 'EAST ZONE',
+          plant: ranchi,
+          counts_toward: 'open',
+          included_in_final_count: true,
+          aging: '8-15 days',
+        },
+        {
+          client: 'Nestle',
+          region: 'EAST ZONE',
+          plant: ranchi,
+          counts_toward: 'solved',
+          included_in_final_count: true,
+        },
+      ] as any[],
+      traceAlign: 'summary',
+      filterMeta: {},
+    });
+    buildDigestAttachments.mockResolvedValue([
+      { filename: 'Trace_Report.xlsx', content: Buffer.from('mock') },
+    ]);
+
+    const result = await buildMisEmailPayload(
+      {
+        ...summaryRecipient,
+        includeDetailed: false,
+        mis_email_preferences: {
+          ...summaryRecipient.mis_email_preferences,
+          includeDetailed: false,
+          includeTraceableExport: true,
+          includeOpenCallsExport: false,
+          bodyInEmail: ['regional_performance', 'branch_performance'],
+        },
+      } as never,
+      {
+        sentTo: 'user@example.com',
+        displayName: 'User',
+      }
+    );
+
+    // Solved stays CRM (40); opens from overlay (2) — not CRM 50 and not full-trace solved 1.
+    expect(result.preview.plainText).toMatch(/RANCHI BRANCH: total 52, solved 40, cancelled 10, open 2/);
+    expect(result.preview.plainText).toMatch(/EAST: total 52, solved 40, cancelled 10, open 2/);
   });
 });
 

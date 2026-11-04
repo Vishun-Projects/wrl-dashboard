@@ -263,8 +263,8 @@ describe('buildMisEmailRegionalPerformanceRowsFromTrace', () => {
   });
 });
 
-describe('digest body trace basis', () => {
-  it('trace body rows align solved/open/cancelled — do not mix summary solved with trace open overlay', () => {
+describe('FromTrace helpers vs hybrid mail body', () => {
+  it('mail body is hybrid (CRM solved + open overlay); FromTrace is Excel/parity only', () => {
     const traceRows = buildBdMisTraceRows({
       crmRows: [
         {
@@ -399,6 +399,57 @@ describe('overlayBranchOpenFromExcelRows', () => {
     expect(overlaid[0]?.open_calls).toBe(1);
     expect((overlaid[0]?.age_7 ?? 0) + (overlaid[0]?.age_15 ?? 0)).toBe(1);
     expect(overlaid[0]?.open_calls).toBeLessThan(crmBranch[0]!.open_calls);
+  });
+
+  it('drops opens whose plant does not resolve onto a WRL branch (no Unassigned bucket)', () => {
+    const crmBranch = [
+      {
+        branch: '1150 - RANCHI BRANCH',
+        region: 'EAST ZONE',
+        total_calls: 10,
+        solved_calls: 5,
+        cancelled_calls: 0,
+        open_calls: 5,
+        age_2: 5,
+        age_3: 0,
+        age_7: 0,
+        age_15: 0,
+        part_pending: 0,
+        active_eng: 0,
+      },
+    ];
+    const traceRows = buildBdMisTraceRows({
+      crmRows: [
+        {
+          region: 'EAST ZONE',
+          plant: 'UNKNOWN PLANT XYZ',
+          technician_name: 'Tech',
+          office_under_branch: 'UNKNOWN PLANT XYZ',
+          customer_name: 'Site',
+          logged_at: '2026-06-20T00:00:00Z',
+          service_order: 'OPEN-1',
+          client: 'Nestle',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+      ],
+      clientRows: [],
+      sources: misEmailBdMisSources(),
+      agingDate: '2026-07-09',
+    });
+
+    const overlaid = overlayBranchOpenFromExcelRows(crmBranch, traceRows, [
+      {
+        ...branch('EAST ZONE', 5),
+        officeId: 1150,
+        branch: '1150 - RANCHI BRANCH',
+      },
+    ]);
+    expect(overlaid.some((r) => /unassigned/i.test(r.branch))).toBe(false);
+    expect(overlaid.find((r) => r.branch.includes('RANCHI'))?.open_calls).toBe(0);
+    expect(overlaid.reduce((s, r) => s + r.open_calls, 0)).toBe(0);
   });
 });
 

@@ -16,7 +16,8 @@ import {
   type ClientMergeWithCrmPrefs,
   type MergeSelection,
 } from '@/modules/mis/services/account-merge';
-import type { AccountSummaryRow, SummaryDashboard } from '@/lib/summary/derive';
+import { resolveTracePlantToWrlBranch } from '@/modules/mis/services/plant-to-wrl-branch';
+import type { AccountSummaryRow, BranchSummaryRow, SummaryDashboard } from '@/lib/summary/derive';
 
 export const MIS_UNIFIED_MERGE_FLAGS: MergeSelection = { crm: true, client: true };
 
@@ -79,6 +80,27 @@ export function countUnifiedTraceOpenCalls(traceRows: BdMisTraceRow[]): number {
   return filterTraceRowsForUnifiedOpenExport(traceRows).filter(
     (row) => row.counts_toward === 'open'
   ).length;
+}
+
+/**
+ * Open-calls Excel / mail body parity: unified Cadbury-safe opens whose plant
+ * maps onto a WRL BRANCH (SAP code 1127 → Guwahati, etc.). Remaps plant label.
+ */
+export function filterTraceRowsForMailBodyOpenExport(
+  traceRows: BdMisTraceRow[],
+  branchSummary?: BranchSummaryRow[]
+): BdMisTraceRow[] {
+  return filterTraceRowsForUnifiedOpenExport(traceRows).flatMap((row) => {
+    const region = String(row.region ?? 'OTHER');
+    if (row.counts_toward === 'cancelled') {
+      const resolved = resolveTracePlantToWrlBranch(row.plant ?? '', region, branchSummary);
+      return resolved ? [{ ...row, plant: resolved.branch }] : [row];
+    }
+    if (row.counts_toward !== 'open') return [];
+    const resolved = resolveTracePlantToWrlBranch(row.plant ?? '', region, branchSummary);
+    if (!resolved) return [];
+    return [{ ...row, plant: resolved.branch }];
+  });
 }
 
 export function computeMisSourceBreakdown(

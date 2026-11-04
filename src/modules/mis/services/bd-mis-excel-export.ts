@@ -12,7 +12,7 @@ import {
   filterTraceRowsForSummaryExport,
   type BdMisTraceRow,
 } from '@/modules/mis/services/bd-mis-trace';
-import { filterTraceRowsForUnifiedOpenExport } from '@/modules/mis/services/mis-unified-metrics';
+import { filterTraceRowsForMailBodyOpenExport } from '@/modules/mis/services/mis-unified-metrics';
 import {
   applyAge15CellStyle,
   applySummaryHeaderStyle,
@@ -568,13 +568,16 @@ export async function buildBdMisTraceableWorkbook(
   return workbook;
 }
 
-/** Open-calls workbook: unified Summary Dashboard formula (import-only Cadbury/Coke). */
+/** Open-calls workbook: same Cadbury-safe + WRL-mapped opens as MIS mail body. */
 export async function buildMisUnifiedOpenCallsWorkbook(
   payload: BdMisTraceableExportPayload
 ): Promise<ExcelJS.Workbook> {
   const ExcelJSRuntime = (await import('exceljs')).default;
   const workbook = new ExcelJSRuntime.Workbook();
-  const rows = filterTraceRowsForUnifiedOpenExport(payload.traceRows);
+  const rows = filterTraceRowsForMailBodyOpenExport(
+    payload.traceRows,
+    payload.crmBranchSummary
+  );
   addTraceRowDetailSheet(workbook, rows, {
     statusLabel: (row) =>
       row.counts_toward === 'cancelled' ? row.call_status || 'Cancelled' : 'Unsolved',

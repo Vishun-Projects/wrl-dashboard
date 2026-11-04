@@ -498,7 +498,10 @@ function rawBranchPerformanceRows(
   data: SummaryDashboard,
   bodyContext: MisEmailBodyContext
 ): BranchPerformanceRow[] {
-  if (bodyContext.branchPerformanceRows?.length) return bodyContext.branchPerformanceRows;
+  // Empty array is valid (all opens zeroed / scoped) — do not fall back to CRM opens.
+  if (bodyContext.branchPerformanceRows !== undefined) {
+    return bodyContext.branchPerformanceRows;
+  }
   return mergeBranchSummaryRowsByName(buildTopLevelBranchRows(data.branchSummary))
     .map((row) => ({
       branch: row.branch,
@@ -523,10 +526,9 @@ function rawBranchPerformanceRows(
 
 /**
  * Regional body = rollup of the same visible branch rows shown below.
- * Do not subtract CRM hidden-branch totals from Excel-overlaid zone opens —
- * that mismatched bases and produced negative >7 (EAST).
+ * Single formula with Branch — never a second account/overlay path.
  */
-function rollupVisibleBranchesToRegional(
+export function rollupVisibleBranchesToRegional(
   branches: BranchPerformanceRow[]
 ): RegionalPerformanceRow[] {
   const map = new Map<string, RegionalPerformanceRow>();
@@ -566,7 +568,7 @@ function regionalRowsForBody(
 ): RegionalPerformanceRow[] {
   // When branch rows were built for the digest, Regional must be their rollup
   // so All ≡ sum(Branches) and no aging field can go negative from subtraction.
-  if (bodyContext.branchPerformanceRows?.length) {
+  if (bodyContext.branchPerformanceRows !== undefined) {
     return rollupVisibleBranchesToRegional(bodyContext.branchPerformanceRows);
   }
   return resolveRegionalPerformanceRows(data, bodyContext);

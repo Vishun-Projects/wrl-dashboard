@@ -4,8 +4,10 @@ import {
   bdMisSourcesFromSelection,
   buildBdMisRegionalRows,
   countTraceOpenCalls,
+  filterTraceRowsForMailBodyOpenExport,
   filterTraceRowsForSummaryExport,
   filterTraceRowsForUnifiedOpenExport,
+  resolveTracePlantToWrlBranch,
   sumBdMisRegionalGrand,
   type BdMisGrandRow,
   type BdMisRegionalRow,
@@ -19,6 +21,8 @@ import { buildMisUnifiedReportAlign } from '@/modules/mis/server';
 import type { AccountSummaryRow, BranchSummaryRow, SummaryDashboard } from '@/lib/summary/derive';
 
 export type { BranchPerformanceRow, RegionalPerformanceRow } from '@/modules/mis-email/services/mail-types';
+/** Re-export for callers/tests that imported resolve from mail-basis. */
+export { resolveTracePlantToWrlBranch };
 
 /** CRM − CRM Cadbury (all zones) + Mondelez import (N/E/S) + Coke import. */
 export function misEmailBdMisSources(): BdMisSourceFlags {
@@ -126,6 +130,8 @@ export function overlayBranchOpenFromExcelRows(
     if (row.counts_toward !== 'open') continue;
     const region = String(row.region ?? 'OTHER').toUpperCase();
     const resolved = resolveTracePlantToWrlBranch(row.plant ?? '', region, branchSummary);
+    // Same as the 2559 mail: plants that do not map onto a WRL branch are omitted
+    // (do not invent an "Unassigned" bucket — that inflated All open).
     if (!resolved) continue;
     const branchRegion = String(resolved.region).toUpperCase();
     const key = `${branchRegion}::${resolved.branch}`;
@@ -279,7 +285,10 @@ export function assertMisEmailOpenParity(
  * Contract: regional/branch email body and open-calls Excel share one call-level basis.
  * Body Total = solved + open + cancelled; detail row count matches that total.
  */
-export function countMisEmailOpenParity(traceRows: BdMisTraceRow[]): {
+export function countMisEmailOpenParity(
+  traceRows: BdMisTraceRow[],
+  branchSummary?: BranchSummaryRow[]
+): {
   regionalBodyOpen: number;
   branchBodyOpen: number;
   excelOpenRows: number;
@@ -289,11 +298,11 @@ export function countMisEmailOpenParity(traceRows: BdMisTraceRow[]): {
   detailOpenCount: number;
   detailSolvedCount: number;
 } {
-  const regional = buildMisEmailRegionalPerformanceRowsFromTrace(traceRows);
-  const branch = buildMisEmailBranchPerformanceRowsFromTrace(traceRows);
+  const regional = buildMisEmailRegionalPerformanceRowsFromTrace(traceRows, branchSummary);
+  const branch = buildMisEmailBranchPerformanceRowsFromTrace(traceRows, branchSummary);
   const detail = filterTraceRowsForSummaryExport(traceRows);
-  // Same open basis as WRL_BD_MIS_Open_Calls attachment (unified filter, open rows only).
-  const excelOpenRows = filterTraceRowsForUnifiedOpenExport(traceRows).filter(
+  // Same open basis as WRL_BD_MIS_Open_Calls attachment (WRL-mapped opens).
+  const excelOpenRows = filterTraceRowsForMailBodyOpenExport(traceRows, branchSummary).filter(
     (row) => row.counts_toward === 'open'
   ).length;
   const regionalBodyOpen = regional.reduce((sum, row) => sum + row.open_calls, 0);
@@ -349,81 +358,6 @@ function accumulateTracePerformanceMetrics<
       agg.engineers.add(techLower);
     }
   }
-}
-
-function isCrmTopLevelBranch(
-  row: BranchSummaryRow,
-  byId: Map<number, BranchSummaryRow>
-): boolean {
-  return row.parentId === 0 || !byId.has(row.parentId);
-}
-
-function crmTopLevelBranch(
-  row: BranchSummaryRow,
-  byId: Map<number, BranchSummaryRow>
-): BranchSummaryRow {
-  let cur = row;
-  const seen = new Set<number>();
-  while (!isCrmTopLevelBranch(cur, byId) && !seen.has(cur.officeId)) {
-    seen.add(cur.officeId);
-    const parent = byId.get(cur.parentId);
-    if (!parent) break;
-    cur = parent;
-  }
-  return cur;
-}
-
-/**
- * Map trace plant labels onto CRM top-level WRL branches (same shape as yesterday's mail).
- * Franchisee offices like ncode 1127 "POWER REFRIGERATION" roll into their parent (Patna),
- * not a fake "1127 - POWER REFRIGERATION" branch row.
- */
-export function resolveTracePlantToWrlBranch(
-  plant: string,
-  region: string,
-  branchSummary: BranchSummaryRow[] | undefined
-): { branch: string; region: string } | null {
-  const label = plant.trim();
-  // Without CRM office tree, keep prior plant/— behavior for fixtures.
-  if (!branchSummary?.length) {
-    return { branch: label || '—', region };
-  }
-  if (!label || label === '—') return null;
-
-  const byId = new Map(branchSummary.map((b) => [b.officeId, b]));
-  const byName = new Map(branchSummary.map((b) => [b.branch.trim().toLowerCase(), b]));
-
-  const named = byName.get(label.toLowerCase());
-  if (named) {
-    const top = crmTopLevelBranch(named, byId);
-    return { branch: top.branch, region: top.region || region };
-  }
-
-  const codeMatch = label.match(/^(\d+)\s*-/);
-  if (codeMatch) {
-    const officeId = Number(codeMatch[1]);
-    const office = byId.get(officeId);
-    if (office) {
-      const top = crmTopLevelBranch(office, byId);
-      return { branch: top.branch, region: top.region || region };
-    }
-    // Only treat "NNNN - … BRANCH" as SAP-style top-level label (Guwahati ncode≠1127).
-    // Do not map "1127 - POWER REFRIGERATION" → Guwahati via the numeric prefix.
-    if (/branch$/i.test(label)) {
-      const prefix = `${codeMatch[1]} -`.toLowerCase();
-      for (const b of branchSummary) {
-        if (!isCrmTopLevelBranch(b, byId)) continue;
-        if (b.branch.trim().toLowerCase().startsWith(prefix) && /branch$/i.test(b.branch)) {
-          return { branch: b.branch, region: b.region || region };
-        }
-      }
-    }
-  }
-
-  if (/^\d+\s*-\s*.+\s+BRANCH$/i.test(label)) {
-    return { branch: label, region };
-  }
-  return null;
 }
 
 export function buildMisEmailRegionalAndBranchRowsFromTrace(

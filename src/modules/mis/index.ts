@@ -15,6 +15,7 @@ export * from './services/search';
 export * from './services/summary-excel-export';
 export * from './services/summary-trace-export';
 export * from './services/mis-unified-metrics';
+export * from './services/plant-to-wrl-branch';
 export * from './services/portal-cache';
 export * from './services/report-page-helpers';
 export * from './services/sync';

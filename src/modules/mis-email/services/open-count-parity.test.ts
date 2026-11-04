@@ -253,8 +253,8 @@ describe('MIS email open-count parity (body === Excel)', () => {
   30_000
   );
 
-  it('regression: summary body can diverge from Excel; trace body must not', () => {
-    // Inflated summary opens (the old email-body path) vs leaner call-level trace.
+  it('regression: CRM summary opens can diverge from Excel; open overlay must match Excel', () => {
+    // Inflated CRM summary opens vs leaner call-level open corpus (mail uses overlay).
     const summary: SummaryDashboard = {
       globalHeadcount: 0,
       branchSummary: [
@@ -406,7 +406,7 @@ describe('MIS email open-count parity (body === Excel)', () => {
     });
   });
 
-  it('rolls franchisee plant POWER REFRIGERATION into parent Patna, not a fake 1127 branch', async () => {
+  it('maps SAP code 1127 on franchisee labels to Guwahati BRANCH (not Patna via officeId)', async () => {
     const {
       buildMisEmailBranchPerformanceRowsFromTrace,
       resolveTracePlantToWrlBranch,
@@ -512,12 +512,45 @@ describe('MIS email open-count parity (body === Excel)', () => {
         population: 0,
         headcount: 0,
       },
+      {
+        officeId: 50,
+        parentId: 612,
+        branch: '1150 - RANCHI BRANCH',
+        region: 'EAST ZONE',
+        total_calls: 0,
+        solved_calls: 0,
+        cancelled_calls: 0,
+        open_calls: 0,
+        age_2: 0,
+        age_3: 0,
+        age_7: 0,
+        age_15: 0,
+        part_pending: 0,
+        all_total: 0,
+        all_solved: 0,
+        all_cancelled: 0,
+        all_open: 0,
+        all_age_2: 0,
+        all_age_3: 0,
+        all_age_7: 0,
+        all_age_15: 0,
+        all_part_pending: 0,
+        all_tech_solved: 0,
+        tech_solved_calls: 0,
+        deployment_total: 0,
+        deployment_done: 0,
+        installation_total: 0,
+        installation_done: 0,
+        active_eng: 0,
+        population: 0,
+        headcount: 0,
+      },
     ];
 
     expect(
       resolveTracePlantToWrlBranch('1127 - POWER REFRIGERATION', 'EAST ZONE', branchSummary)
     ).toEqual({
-      branch: '1182 - PATNA BRANCH',
+      branch: '1127 - GUWAHATI BRANCH',
       region: 'EAST ZONE',
     });
     expect(resolveTracePlantToWrlBranch('POWER REFRIGERATION', 'EAST ZONE', branchSummary)).toEqual({
@@ -528,6 +561,12 @@ describe('MIS email open-count parity (body === Excel)', () => {
       resolveTracePlantToWrlBranch('1127 - GUWAHATI BRANCH', 'EAST ZONE', branchSummary)
     ).toEqual({
       branch: '1127 - GUWAHATI BRANCH',
+      region: 'EAST ZONE',
+    });
+    expect(
+      resolveTracePlantToWrlBranch('1150 - HIMALAYA REFREGERATIO', 'EAST ZONE', branchSummary)
+    ).toEqual({
+      branch: '1150 - RANCHI BRANCH',
       region: 'EAST ZONE',
     });
 
@@ -568,10 +607,8 @@ describe('MIS email open-count parity (body === Excel)', () => {
     });
 
     const branches = buildMisEmailBranchPerformanceRowsFromTrace(traceRows, branchSummary);
-    expect(branches.map((b) => b.branch).sort()).toEqual([
-      '1127 - GUWAHATI BRANCH',
-      '1182 - PATNA BRANCH',
-    ]);
-    expect(branches.find((b) => /POWER/i.test(b.branch))).toBeUndefined();
+    expect(branches.map((b) => b.branch).sort()).toEqual(['1127 - GUWAHATI BRANCH']);
+    expect(branches.find((b) => b.branch === '1127 - GUWAHATI BRANCH')?.open_calls).toBe(2);
+    expect(branches.find((b) => /POWER|PATNA/i.test(b.branch))).toBeUndefined();
   });
 });
