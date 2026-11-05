@@ -176,17 +176,197 @@ export function buildMisEmailWrlBranchBase(
   branchSummary: BranchSummaryRow[],
   traceRows: BdMisTraceRow[] = []
 ): BranchPerformanceRow[] {
-  const rolled = rollupCrmOfficesToWrlBranches(branchSummary).map((row) => ({
-    ...row,
-    // Opens replaced by Excel overlay next — keep aging zeroed here.
+  const rolled = rollupCrmOfficesToWrlBranches(branchSummary).map((row) => {
+    const solved = Math.max(0, Number(row.solved_calls || 0));
+    const cancelled = Math.max(0, Number(row.cancelled_calls || 0));
+    return {
+      ...row,
+      solved_calls: solved,
+      cancelled_calls: cancelled,
+      // Opens replaced by Excel overlay next — keep aging zeroed here.
+      open_calls: 0,
+      age_2: 0,
+      age_3: 0,
+      age_7: 0,
+      age_15: 0,
+      total_calls: solved + cancelled,
+    };
+  });
+  return addImportSolvedCancelledToWrlBranches(rolled, traceRows, branchSummary);
+}
+
+function regionMatchKey(region: string): string {
+  return region.trim().toUpperCase().replace(/\s+ZONE$/, '');
+}
+
+function isNonZeroMailBranchRow(row: BranchPerformanceRow): boolean {
+  return (
+    Number(row.solved_calls || 0) +
+      Number(row.open_calls || 0) +
+      Number(row.cancelled_calls || 0) +
+      Number(row.age_2 || 0) +
+      Number(row.age_3 || 0) +
+      Number(row.age_7 || 0) +
+      Number(row.age_15 || 0) +
+      Number(row.part_pending || 0) +
+      Number(row.active_eng || 0) >
+    0
+  );
+}
+
+const MAIL_BRANCH_COUNT_FIELDS = [
+  'total_calls',
+  'solved_calls',
+  'cancelled_calls',
+  'open_calls',
+  'age_2',
+  'age_3',
+  'age_7',
+  'age_15',
+  'part_pending',
+  'active_eng',
+] as const satisfies ReadonlyArray<keyof RegionalPerformanceRow>;
+
+/** Regional All = sum of the same visible Branch rows (one grain). */
+export function rollupMailBranchesToRegional(
+  branches: BranchPerformanceRow[]
+): RegionalPerformanceRow[] {
+  const map = new Map<string, RegionalPerformanceRow>();
+  for (const row of branches) {
+    if (isMailBodyHiddenBranch(row.branch) || !isNonZeroMailBranchRow(row)) continue;
+    const region = String(row.region ?? 'OTHER');
+    const key = regionMatchKey(region);
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, {
+        region,
+        total_calls: Number(row.total_calls || 0),
+        solved_calls: Number(row.solved_calls || 0),
+        cancelled_calls: Number(row.cancelled_calls || 0),
+        open_calls: Number(row.open_calls || 0),
+        age_2: Number(row.age_2 || 0),
+        age_3: Number(row.age_3 || 0),
+        age_7: Number(row.age_7 || 0),
+        age_15: Number(row.age_15 || 0),
+        part_pending: Number(row.part_pending || 0),
+        active_eng: Number(row.active_eng || 0),
+      });
+      continue;
+    }
+    for (const field of MAIL_BRANCH_COUNT_FIELDS) {
+      prev[field] = Number(prev[field] || 0) + Number(row[field] || 0);
+    }
+  }
+  return [...map.values()].sort((a, b) =>
+    regionMatchKey(a.region).localeCompare(regionMatchKey(b.region))
+  );
+}
+
+type MailBranchAgg = BranchPerformanceRow & { engineers: Set<string> };
+
+function emptyMailBranchAgg(branch: string, region: string): MailBranchAgg {
+  return {
+    branch,
+    region,
+    total_calls: 0,
+    solved_calls: 0,
+    cancelled_calls: 0,
     open_calls: 0,
     age_2: 0,
     age_3: 0,
     age_7: 0,
     age_15: 0,
-    total_calls: row.solved_calls + row.cancelled_calls,
-  }));
-  return addImportSolvedCancelledToWrlBranches(rolled, traceRows, branchSummary);
+    part_pending: 0,
+    active_eng: 0,
+    engineers: new Set<string>(),
+  };
+}
+
+function noteEngineer(agg: MailBranchAgg, row: BdMisTraceRow): void {
+  const technician = row.technician_name;
+  if (!technician || technician === '—' || technician === '-') return;
+  if (technician.toLowerCase() === 'unassigned') return;
+  agg.engineers.add(technician.toLowerCase());
+}
+
+/**
+ * ONE source for mail body + Summary Excel + Open Excel:
+ * - open + cancelled = filterTraceRowsForMailBodyOpenExport (exact Open Calls sheet)
+ * - solved = SummaryExport included solved, same WRL plant map
+ * Regional = Branch rollup. No CRM-summary / account-merge / align second path.
+ */
+export function buildMisEmailMailPerformanceTables(
+  traceRows: BdMisTraceRow[],
+  branchSummary?: BranchSummaryRow[]
+): { regional: RegionalPerformanceRow[]; branch: BranchPerformanceRow[] } {
+  const byKey = new Map<string, MailBranchAgg>();
+
+  const touch = (branch: string, region: string): MailBranchAgg => {
+    const key = `${regionMatchKey(region)}::${branch}`;
+    let agg = byKey.get(key);
+    if (!agg) {
+      agg = emptyMailBranchAgg(branch, region);
+      byKey.set(key, agg);
+    }
+    return agg;
+  };
+
+  // Open Calls Excel rows — body cancelled/open MUST match this set 1:1.
+  for (const row of filterTraceRowsForMailBodyOpenExport(traceRows, branchSummary)) {
+    const plant = String(row.plant ?? '').trim();
+    if (!plant || plant === '—' || isMailBodyHiddenBranch(plant)) continue;
+    // Cancelled rows that failed WRL map keep raw plant; only count real BRANCH labels.
+    if (!/branch$/i.test(plant) && row.counts_toward === 'cancelled') continue;
+    const region = String(row.region ?? 'OTHER').toUpperCase();
+    const agg = touch(plant, region);
+    if (row.counts_toward === 'cancelled') {
+      agg.cancelled_calls += 1;
+    } else if (row.counts_toward === 'open') {
+      agg.open_calls += 1;
+      const aging = row.aging;
+      if (aging === '<2 days') agg.age_2 += 1;
+      else if (aging === '>3 days' || aging === '3-7 days') agg.age_3 += 1;
+      else if (aging === '>7 days' || aging === '8-15 days') agg.age_7 += 1;
+      else if (aging === '>15 days') agg.age_15 += 1;
+    } else {
+      continue;
+    }
+    noteEngineer(agg, row);
+  }
+
+  // Solved from the Cadbury-safe included corpus, same WRL map as opens.
+  for (const row of filterTraceRowsForSummaryExport(traceRows)) {
+    if (row.counts_toward !== 'solved') continue;
+    const region = String(row.region ?? 'OTHER').toUpperCase();
+    const resolved = resolveTracePlantToWrlBranch(row.plant ?? '', region, branchSummary);
+    if (!resolved || isMailBodyHiddenBranch(resolved.branch)) continue;
+    const agg = touch(resolved.branch, String(resolved.region ?? region).toUpperCase());
+    agg.solved_calls += 1;
+    noteEngineer(agg, row);
+  }
+
+  const branch = [...byKey.values()]
+    .map(({ engineers, ...row }) => {
+      const solved = Number(row.solved_calls || 0);
+      const cancelled = Number(row.cancelled_calls || 0);
+      const open = Number(row.open_calls || 0);
+      return {
+        ...row,
+        solved_calls: solved,
+        cancelled_calls: cancelled,
+        open_calls: open,
+        total_calls: solved + cancelled + open,
+        active_eng: engineers.size,
+      };
+    })
+    .filter((row) => !isMailBodyHiddenBranch(row.branch) && isNonZeroMailBranchRow(row))
+    .sort((a, b) => {
+      const age15Diff = Number(b.age_15 || 0) - Number(a.age_15 || 0);
+      if (age15Diff !== 0) return age15Diff;
+      return String(a.branch).localeCompare(String(b.branch));
+    });
+
+  return { branch, regional: rollupMailBranchesToRegional(branch) };
 }
 
 export function overlayBranchOpenFromExcelRows(

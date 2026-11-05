@@ -4,6 +4,7 @@ import {
   assertMisEmailOpenParity,
   buildMisEmailBranchPerformanceRowsFromTrace,
   buildMisEmailBdMisRegionalPayload,
+  buildMisEmailMailPerformanceTables,
   buildMisEmailRegionalPerformanceRows,
   buildMisEmailRegionalPerformanceRowsFromTrace,
   misEmailBdMisSources,
@@ -11,7 +12,12 @@ import {
   overlayRegionalOpenFromExcelRows,
   reconcileMisEmailOpenCounts,
 } from '@/modules/mis-email/services/mail-basis';
-import { buildBdMisTraceRows, countTraceOpenCalls, filterTraceRowsForOpenExport } from '@/modules/mis';
+import {
+  buildBdMisTraceRows,
+  countTraceOpenCalls,
+  filterTraceRowsForMailBodyOpenExport,
+  filterTraceRowsForOpenExport,
+} from '@/modules/mis';
 
 function branch(zone: string, open: number): BranchSummaryRow {
   return {
@@ -450,6 +456,72 @@ describe('overlayBranchOpenFromExcelRows', () => {
     expect(overlaid.some((r) => /unassigned/i.test(r.branch))).toBe(false);
     expect(overlaid.find((r) => r.branch.includes('RANCHI'))?.open_calls).toBe(0);
     expect(overlaid.reduce((s, r) => s + r.open_calls, 0)).toBe(0);
+  });
+});
+
+describe('buildMisEmailMailPerformanceTables', () => {
+  it('body cancelled/open match MailBodyOpenExport (Open Excel), Regional ≡ Branch', () => {
+    const traceRows = buildBdMisTraceRows({
+      crmRows: [
+        {
+          region: 'EAST ZONE',
+          plant: '1154 - KOLKATA BRANCH',
+          technician_name: 'T1',
+          office_under_branch: 'Kolkata',
+          customer_name: 'C1',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'O1',
+          client: 'Nestle',
+          call_status: 'Cancelled',
+          status_bucket: 'cancelled',
+          ncancelreason: 'x',
+          account: 'Nestle',
+        },
+        {
+          region: 'EAST ZONE',
+          plant: '1154 - KOLKATA BRANCH',
+          technician_name: 'T2',
+          office_under_branch: 'Kolkata',
+          customer_name: 'C2',
+          logged_at: '2026-07-01T00:00:00Z',
+          service_order: 'O2',
+          client: 'Nestle',
+          call_status: 'Assigned',
+          status_bucket: 'assigned',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+        {
+          region: 'EAST ZONE',
+          plant: '1154 - KOLKATA BRANCH',
+          technician_name: 'T3',
+          office_under_branch: 'Kolkata',
+          customer_name: 'C3',
+          logged_at: '2026-06-01T00:00:00Z',
+          service_order: 'O3',
+          client: 'Nestle',
+          call_status: 'Solved',
+          status_bucket: 'solved',
+          ncancelreason: null,
+          account: 'Nestle',
+        },
+      ],
+      clientRows: [],
+      sources: misEmailBdMisSources(),
+      agingDate: '2026-07-09',
+    });
+    const { regional, branch } = buildMisEmailMailPerformanceTables(traceRows);
+    const kol = branch.find((r) => /KOLKATA/i.test(r.branch));
+    expect(kol?.cancelled_calls).toBe(1);
+    expect(kol?.open_calls).toBe(1);
+    expect(kol?.solved_calls).toBe(1);
+    const excelCancel = filterTraceRowsForMailBodyOpenExport(traceRows).filter(
+      (r) => r.counts_toward === 'cancelled' && /KOLKATA/i.test(String(r.plant || ''))
+    ).length;
+    expect(kol?.cancelled_calls).toBe(excelCancel);
+    expect(regional.reduce((s, r) => s + r.cancelled_calls, 0)).toBe(
+      branch.reduce((s, r) => s + r.cancelled_calls, 0)
+    );
   });
 });
 

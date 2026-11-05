@@ -94,14 +94,11 @@ export function filterTraceRowsForMailBodyOpenExport(
   branchSummary?: BranchSummaryRow[]
 ): BdMisTraceRow[] {
   return filterTraceRowsForUnifiedOpenExport(traceRows).flatMap((row) => {
+    if (row.counts_toward !== 'open' && row.counts_toward !== 'cancelled') return [];
     const region = String(row.region ?? 'OTHER');
-    if (row.counts_toward === 'cancelled') {
-      const resolved = resolveTracePlantToWrlBranch(row.plant ?? '', region, branchSummary);
-      if (!resolved || isMailBodyHiddenBranch(resolved.branch)) return [row];
-      return [{ ...row, plant: resolved.branch }];
-    }
-    if (row.counts_toward !== 'open') return [];
     const resolved = resolveTracePlantToWrlBranch(row.plant ?? '', region, branchSummary);
+    // Same rule for open + cancelled: only WRL-mapped visible BRANCH rows.
+    // (Previously unmapped cancelled stayed as raw plant — Excel≠body.)
     if (!resolved || isMailBodyHiddenBranch(resolved.branch)) return [];
     return [{ ...row, plant: resolved.branch }];
   });

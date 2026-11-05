@@ -11,11 +11,11 @@ import {
   resolveDigestKeyAccountBodyRows,
 } from '@/modules/mis-email/services/fetch-digest-accounts';
 import {
-  buildMisEmailWrlBranchBase,
-  overlayBranchOpenFromExcelRows,
+  buildMisEmailMailPerformanceTables,
   reconcileMisEmailOpenCounts,
 } from '@/modules/mis-email/services/mail-basis';
 import type { BdMisTraceRow } from '@/modules/mis';
+import type { BranchPerformanceRow, RegionalPerformanceRow } from '@/modules/mis-email/services/mail-types';
 import {
   fetchDigestRegisterRows,
   type DigestDateRange,
@@ -127,11 +127,12 @@ async function buildMisEmailBodyContext(
   bodySectionIds: ReturnType<typeof resolveDigestBodySections>,
   clientAccountSummary?: Awaited<ReturnType<typeof fetchDigestClientAccountSummaryCached>>,
   options?: {
-    /**
-     * Unified open-calls corpus. Required for regional/branch body —
-     * CRM solved/cancelled + these opens (never CRM opens, never full-trace body).
-     */
+    /** Same tables as Summary Excel uiAlign — required for regional/branch body. */
     openTraceRows?: BdMisTraceRow[];
+    mailTables?: {
+      regional: RegionalPerformanceRow[];
+      branch: BranchPerformanceRow[];
+    };
   }
 ): Promise<MisEmailBodyContext> {
   const explicitAccounts = parseMisEmailKeyAccountsInBody(prefs.keyAccountsInBody);
@@ -156,23 +157,19 @@ async function buildMisEmailBodyContext(
     context.clientAccountSummary = clientRows as Array<Record<string, unknown>>;
   }
 
-  // Preview ≡ send. One grain: WRL Branch (CRM offices rolled up + import solved
-  // + Excel opens) → Regional is that rollup. Open Excel uses the same open set.
+  // Preview ≡ send ≡ Summary Excel. One call-level WRL grain — no CRM-summary /
+  // account-merge / align second path.
   if (needsRegionalBody || needsBranchBody) {
     if (openTraceRows === undefined) {
       throw new Error(
         'MIS regional/branch body requires open-calls corpus — refusing CRM-open fallback'
       );
     }
-    const branch = overlayBranchOpenFromExcelRows(
-      buildMisEmailWrlBranchBase(data.branchSummary, openTraceRows),
-      openTraceRows,
-      data.branchSummary
-    );
-    if (needsBranchBody) context.branchPerformanceRows = branch;
-    if (needsRegionalBody) {
-      context.regionalPerformanceRows = rollupVisibleBranchesToRegional(branch);
+    if (!options?.mailTables) {
+      throw new Error('MIS mail tables missing — refuse dual-path body build');
     }
+    if (needsRegionalBody) context.regionalPerformanceRows = options.mailTables.regional;
+    if (needsBranchBody) context.branchPerformanceRows = options.mailTables.branch;
   }
 
   if (needsKeyAccountBody) {
@@ -366,13 +363,8 @@ export async function buildMisEmailPayload(
         (rows) => `rows=${rows.length}`
       );
     } catch (err: unknown) {
-      if (options.forPreview) {
-        clientAccountSummary = [];
-        const reason = err instanceof Error ? err.message : 'unavailable';
-        timer.step('fetch client accounts', `CRM only in preview (${reason})`);
-      } else {
-        throw err;
-      }
+      // Preview ≡ send — never silently drop Mondelez/Coke (that undercounts Regional).
+      throw err;
     }
   }
 
@@ -392,14 +384,21 @@ export async function buildMisEmailPayload(
     attachmentIncludes = { ...effectiveIncludes, includeDetailed: false };
   }
 
-  // Body + Excel share one open corpus. Preview skips file build / full YTD
-  // solved rows; open-only overlay is enough for body parity with send.
-  const needsFullTraceCorpus = includeTraceableExport && !options.forPreview;
-  const needsTracePayload =
+  // One corpus for body + Summary Excel + Open Excel. Never open-only when mail
+  // tables are needed (that was the 1034 vs 1483 cancelled split).
+  const needsMailTables =
     needsOpenOverlay ||
+    (!options.forPreview &&
+      (attachmentIncludes.includeSummary ||
+        includeTraceableExport ||
+        includeOpenCallsExport));
+  const needsFullTraceCorpus = needsMailTables || includeTraceableExport;
+  const needsTracePayload =
+    needsMailTables ||
     (!options.forPreview && (includeTraceableExport || includeOpenCallsExport));
   const skipRepairDone =
-    !!options.forPreview || !(includeTraceableExport || includeOpenCallsExport);
+    !needsMailTables &&
+    (!!options.forPreview || !(includeTraceableExport || includeOpenCallsExport));
 
   const tracePayload = needsTracePayload
     ? await timer.measure(
@@ -411,7 +410,8 @@ export async function buildMisEmailPayload(
             data,
             clientAccountSummary ?? [],
             {
-              includeTraceableExport,
+              // Body forces full corpus; these flags only matter for Excel attach build.
+              includeTraceableExport: includeTraceableExport && !options.forPreview,
               includeOpenCallsExport: includeOpenCallsExport && !options.forPreview,
               requireFullCorpus: needsFullTraceCorpus,
               skipRepairDone,
@@ -426,6 +426,18 @@ export async function buildMisEmailPayload(
     console.log(
       `[mis-email/trace] open reconcile summary=${reconciliation.summaryOpen} trace=${reconciliation.traceOpenIncluded} delta=${reconciliation.delta} match=${reconciliation.matches}`
     );
+  }
+
+  const mailTables = tracePayload
+    ? buildMisEmailMailPerformanceTables(tracePayload.traceRows, data.branchSummary)
+    : undefined;
+
+  if (
+    !options.forPreview &&
+    attachmentIncludes.includeSummary &&
+    !mailTables
+  ) {
+    throw new Error('MIS Summary Excel requires mailTables — refuse CRM-summary fallback');
   }
 
   let emailAttachments: EmailAttachment[];
@@ -443,6 +455,7 @@ export async function buildMisEmailPayload(
         clientAccountSummary: clientAccountSummary ?? [],
         effectiveIncludes: attachmentIncludes,
         tracePayload,
+        mailTables,
       }), (attachments) =>
         attachments
           .map((file) => `${file.filename} ${formatBytes(file.content.length)}`)
@@ -464,27 +477,30 @@ export async function buildMisEmailPayload(
       bodySectionIds,
       clientAccountSummary,
       {
-        // Always the same open overlay — never switch body to full-trace when Excel is on.
         openTraceRows: needsOpenOverlay ? (tracePayload?.traceRows ?? []) : undefined,
+        mailTables,
       }
     ), (ctx) => `accountRows=${ctx.accountRows?.length ?? 0}`
   );
 
-  // Runtime lock: Regional All open ≡ Branch open (same WRL-mapped Excel set).
+  // Runtime lock: Regional All ≡ Branch sum (solved/cancelled/open).
   if (
     bodyContext.branchPerformanceRows !== undefined &&
     bodyContext.regionalPerformanceRows !== undefined
   ) {
     const fromBranches = rollupVisibleBranchesToRegional(bodyContext.branchPerformanceRows);
-    const regionalOpen = bodyContext.regionalPerformanceRows.reduce(
-      (s, r) => s + Number(r.open_calls || 0),
-      0
-    );
-    const rollupOpen = fromBranches.reduce((s, r) => s + Number(r.open_calls || 0), 0);
-    if (regionalOpen !== rollupOpen) {
-      throw new Error(
-        `MIS body Regional open (${regionalOpen}) !== Branch rollup open (${rollupOpen}) — refuse send/preview`
-      );
+    const sumField = (
+      rows: { solved_calls?: number; cancelled_calls?: number; open_calls?: number }[],
+      field: 'solved_calls' | 'cancelled_calls' | 'open_calls'
+    ) => rows.reduce((s, r) => s + Number(r[field] || 0), 0);
+    for (const field of ['solved_calls', 'cancelled_calls', 'open_calls'] as const) {
+      const regional = sumField(bodyContext.regionalPerformanceRows, field);
+      const rollup = sumField(fromBranches, field);
+      if (regional !== rollup) {
+        throw new Error(
+          `MIS body Regional ${field} (${regional}) !== Branch rollup (${rollup}) — refuse send/preview`
+        );
+      }
     }
   }
 
@@ -581,46 +597,22 @@ export async function sendMisEmailCompose(
 ): Promise<MisEmailSendResult> {
   const sentTo = options.sentTo.trim().toLowerCase();
   const displayName = options.displayName?.trim() || recipient.name;
-  const { preview, emailAttachments, dateRange, scopeLabel, bodyHtml, bodyPlainText } =
-    await buildMisEmailPayload(recipient, {
+  const { preview, emailAttachments, dateRange, scopeLabel } = await buildMisEmailPayload(
+    recipient,
+    {
       preferences: options.preferences,
       sentTo,
       displayName,
       introPreset: options.introPreset,
-    });
+    }
+  );
 
-  const org = await getMisEmailOrgSettings({ fresh: true });
-  const portalUrl = resolvePortalUrl(org.portalBaseUrl);
-  const branding = {
-    greeting: org.greeting,
-    brandTitle: org.brandTitle,
-    brandSubtitle: resolveMisEmailBrandSubtitle(org.brandSubtitle, options.introPreset),
-    subjectTemplate: resolveMisEmailSubjectTemplate(options.introPreset, {
-      normal: org.subjectTemplate,
-      revised: org.subjectTemplateRevised,
-    }),
-    introText: resolveMisEmailIntroText(options.introPreset, {
-      normal: org.introTextNormal,
-      revised: org.introTextRevised,
-    }),
-    introPreset: options.introPreset === 'revised' ? ('revised' as const) : ('normal' as const),
-  };
-  const emailBody = {
-    recipientName: displayName,
-    recipientEmail: sentTo,
-    dateRange,
-    scopeLabel,
-    portalUrl,
-    bodyHtml,
-    bodyPlainText,
-    branding,
-  };
-
+  // Same bytes as the live preview — do not re-render a second body path.
   const { messageId } = await sendPreparedDigestEmail({
     to: sentTo,
     subject: preview.subject,
-    html: buildDigestEmailHtml(emailBody),
-    text: buildDigestEmailPlainText(emailBody),
+    html: preview.html,
+    text: preview.plainText,
     attachments: emailAttachments,
   });
 
@@ -717,8 +709,6 @@ export async function sendMisEmailComposeBatch(
     emailAttachments,
     dateRange,
     scopeLabel,
-    bodyHtml,
-    bodyPlainText,
     timing: buildTiming,
   } = await buildMisEmailPayload(recipient, {
     preferences: options.preferences,
@@ -728,38 +718,10 @@ export async function sendMisEmailComposeBatch(
     timer: batchTimer,
   });
 
-  const org = await getMisEmailOrgSettings({ fresh: true });
-  const portalUrl = resolvePortalUrl(org.portalBaseUrl);
-  const branding = {
-    greeting: org.greeting,
-    brandTitle: org.brandTitle,
-    brandSubtitle: resolveMisEmailBrandSubtitle(org.brandSubtitle, options.introPreset),
-    subjectTemplate: resolveMisEmailSubjectTemplate(options.introPreset, {
-      normal: org.subjectTemplate,
-      revised: org.subjectTemplateRevised,
-    }),
-    introText: resolveMisEmailIntroText(options.introPreset, {
-      normal: org.introTextNormal,
-      revised: org.introTextRevised,
-    }),
-    introPreset: options.introPreset === 'revised' ? ('revised' as const) : ('normal' as const),
-  };
-  const emailBody = {
-    recipientName: options.displayName?.trim() || recipient.name,
-    recipientEmail: primaryTarget,
-    dateRange,
-    scopeLabel,
-    portalUrl,
-    bodyHtml,
-    bodyPlainText,
-    branding,
-  };
-
   const sentToLabel = targets.join(', ');
   const headerTo = targets.length === 1 ? targets[0] : targets;
   const headerCc = ccTargets.length ? ccTargets : undefined;
-  const html = buildDigestEmailHtml(emailBody);
-  const text = buildDigestEmailPlainText(emailBody);
+  // Same HTML/text as preview — one body path only.
   const { messageId } = await batchTimer.measure(
     `smtp send → to ${sentToLabel}${headerCc ? ` · cc ${ccTargets.join(', ')}` : ''}`,
     () =>
@@ -767,8 +729,8 @@ export async function sendMisEmailComposeBatch(
         to: headerTo,
         cc: headerCc,
         subject: preview.subject,
-        html,
-        text,
+        html: preview.html,
+        text: preview.plainText,
         attachments: emailAttachments,
       })
   );

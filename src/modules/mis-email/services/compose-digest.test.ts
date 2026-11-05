@@ -300,7 +300,7 @@ describe('buildMisEmailPayload early exits', () => {
       expect.anything(),
       expect.anything(),
       expect.anything(),
-      expect.objectContaining({ requireFullCorpus: false })
+      expect.objectContaining({ requireFullCorpus: true })
     );
   });
 
@@ -571,9 +571,9 @@ describe('buildMisEmailPayload early exits', () => {
       }
     );
 
-    // Branch and Regional share one WRL grain (rollup parity).
-    expect(result.preview.plainText).toMatch(/RANCHI BRANCH: total 52, solved 40, cancelled 10, open 2/);
-    expect(result.preview.plainText).toMatch(/EAST: total 52, solved 40, cancelled 10, open 2/);
+    // One call-level grain: body counts come from the same trace rows as Excel.
+    expect(result.preview.plainText).toMatch(/RANCHI BRANCH: total 3, solved 1, cancelled 0, open 2/);
+    expect(result.preview.plainText).toMatch(/EAST: total 3, solved 1, cancelled 0, open 2/);
   });
 });
 

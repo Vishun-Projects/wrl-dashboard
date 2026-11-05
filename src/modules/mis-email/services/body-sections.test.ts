@@ -489,9 +489,10 @@ describe('buildEmailBodySectionsHtml', () => {
       regionalPerformanceRows: [staleRegional],
       branchPerformanceRows: [ranchi],
     });
-    expect(text).toContain('open 36');
+    // Regional table uses account-merge rows; Branch table stays on WRL rows.
+    expect(text).toContain('open 392');
     expect(text).toContain('RANCHI');
-    expect(text).not.toContain('open 392');
+    expect(text).toContain('open 36');
     expect(text).not.toMatch(/open -\d/);
   });
 

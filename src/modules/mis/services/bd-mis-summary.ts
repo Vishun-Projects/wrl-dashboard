@@ -136,17 +136,18 @@ export function addBdMisMetrics(a: BdMisMetricBundle, b: BdMisMetricBundle): BdM
 }
 
 export function subtractBdMisMetrics(a: BdMisMetricBundle, b: BdMisMetricBundle): BdMisMetricBundle {
+  // Cadbury/Coke subtract must never invent negative cancelled/solved in zone mail.
   return {
-    total_calls: a.total_calls - b.total_calls,
-    total_solved: a.total_solved - b.total_solved,
-    cancelled_calls: a.cancelled_calls - b.cancelled_calls,
-    open_calls: a.open_calls - b.open_calls,
-    age_2: a.age_2 - b.age_2,
-    age_3: a.age_3 - b.age_3,
-    age_7: a.age_7 - b.age_7,
-    age_15: a.age_15 - b.age_15,
-    part_pending: a.part_pending - b.part_pending,
-    active_eng: a.active_eng - b.active_eng,
+    total_calls: Math.max(0, a.total_calls - b.total_calls),
+    total_solved: Math.max(0, a.total_solved - b.total_solved),
+    cancelled_calls: Math.max(0, a.cancelled_calls - b.cancelled_calls),
+    open_calls: Math.max(0, a.open_calls - b.open_calls),
+    age_2: Math.max(0, a.age_2 - b.age_2),
+    age_3: Math.max(0, a.age_3 - b.age_3),
+    age_7: Math.max(0, a.age_7 - b.age_7),
+    age_15: Math.max(0, a.age_15 - b.age_15),
+    part_pending: Math.max(0, a.part_pending - b.part_pending),
+    active_eng: Math.max(0, a.active_eng - b.active_eng),
   };
 }
 

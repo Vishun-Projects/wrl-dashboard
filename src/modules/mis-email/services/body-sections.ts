@@ -556,12 +556,12 @@ function regionalRowsForBody(
   data: SummaryDashboard,
   bodyContext: MisEmailBodyContext
 ): RegionalPerformanceRow[] {
-  // Regional ≡ Branch rollup whenever Branch rows exist (All must match Branch sum).
-  if (bodyContext.branchPerformanceRows !== undefined) {
-    return rollupVisibleBranchesToRegional(bodyContext.branchPerformanceRows);
-  }
+  // Same grain as Branch / Summary Excel (call-level WRL tables from compose).
   if (bodyContext.regionalPerformanceRows !== undefined) {
     return resolveRegionalPerformanceRows(data, bodyContext);
+  }
+  if (bodyContext.branchPerformanceRows !== undefined) {
+    return rollupVisibleBranchesToRegional(bodyContext.branchPerformanceRows);
   }
   return resolveRegionalPerformanceRows(data, bodyContext);
 }

@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * Hard lock: MIS mail body — Regional ≡ Branch rollup; opens ≡ Excel.
+ * Hard lock: MIS mail uses ONE call-level WRL grain.
  *
- * Branch = CRM offices rolled to WRL + import solved/cancelled + Excel open overlay.
- * Regional = that Branch rollup. Open Excel = same WRL-mapped opens.
+ * Body Regional + Branch + Summary Excel uiAlign = buildMisEmailMailPerformanceTables(trace).
+ * Open Excel = same WRL-mapped opens. Preview HTML === send HTML.
+ * No account-merge body, no align hack, no CRM-open fallback, no Unassigned.
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -37,27 +38,27 @@ function mustNotInclude(file, pattern, why) {
 
 const compose = read('src/modules/mis-email/services/compose-digest.ts');
 const mailBasis = read('src/modules/mis-email/services/mail-basis.ts');
+const attachments = read('src/modules/mis-email/services/build-attachments.ts');
 const excel = read('src/modules/mis/services/bd-mis-excel-export.ts');
 const plant = read('src/modules/mis/services/plant-to-wrl-branch.ts');
-const body = read('src/modules/mis-email/services/body-sections.ts');
 
 mustNotInclude(compose, 'fullTraceRows', 'compose must not switch body to full-trace when Excel is on');
+mustNotInclude(compose, 'Unassigned', 'do not invent an Unassigned branch bucket for opens');
 mustNotInclude(
   compose,
-  'buildMisEmailRegionalAndBranchRowsFromTrace',
-  'compose must not use FromTrace rows for the mail body'
-);
-mustNotInclude(
-  compose,
-  'overlayRegionalOpenFromExcelRows',
-  'Regional must be Branch rollup — not a second zone overlay path'
+  'alignBranchSolvedCancelledToRegional',
+  'no zone-align hack (invents cancelled/solved on largest branch)'
 );
 mustNotInclude(
   compose,
   'buildMisEmailRegionalPerformanceRows',
-  'Regional must not use separate account-merge path (breaks Branch parity)'
+  'no account-merge Regional body (second source vs Excel)'
 );
-mustNotInclude(compose, 'Unassigned', 'do not invent an Unassigned branch bucket for opens');
+mustNotInclude(
+  compose,
+  'overlayRegionalOpenFromExcelRows',
+  'no separate regional overlay path'
+);
 mustNotInclude(
   compose,
   /openTraceRows\?\.length/,
@@ -70,48 +71,57 @@ mustInclude(
 );
 mustInclude(
   compose,
-  'buildMisEmailWrlBranchBase',
-  'Branch base must roll CRM offices to WRL + import solved'
+  'buildMisEmailMailPerformanceTables',
+  'body must use the single mail performance table builder'
 );
 mustInclude(
   compose,
-  'rollupVisibleBranchesToRegional',
-  'Regional must be Branch rollup'
+  'html: preview.html',
+  'send must reuse preview HTML (no second body render)'
 );
 mustInclude(
   compose,
-  'Regional open (',
-  'compose must assert Regional open ≡ Branch rollup open'
+  'mailTables',
+  'compose must pass the same tables to body and attachments'
 );
 mustInclude(
   compose,
-  'openTraceRows: needsOpenOverlay',
-  'preview and send must pass the same open overlay'
+  'needsMailTables',
+  'mail tables drive body + Summary Excel from one corpus'
+);
+mustInclude(
+  compose,
+  'refuse CRM-summary fallback',
+  'Summary Excel must not fall back to CRM branchSummary'
+);
+mustInclude(
+  mailBasis,
+  'filterTraceRowsForMailBodyOpenExport',
+  'body cancelled/open must use the Open Excel filter'
 );
 
 mustNotInclude(mailBasis, 'MIS_UNASSIGNED_BRANCH_LABEL', 'no Unassigned open bucket');
-mustNotInclude(mailBasis, '— Unassigned', 'no Unassigned open bucket');
-mustInclude(mailBasis, 'buildMisEmailWrlBranchBase', 'WRL branch base builder required');
-mustInclude(mailBasis, 'isMailBodyHiddenBranch(resolved.branch)', 'hidden WRL opens omitted from overlay');
+mustNotInclude(mailBasis, 'alignBranchSolvedCancelledToRegional', 'align helper must stay deleted');
+mustInclude(mailBasis, 'buildMisEmailMailPerformanceTables', 'single mail table builder required');
+mustInclude(mailBasis, 'rollupMailBranchesToRegional', 'Regional must roll up from Branch');
+
+mustInclude(
+  attachments,
+  'mailTablesToSummaryAlign',
+  'Summary Excel must use the same mailTables as the body'
+);
+mustNotInclude(
+  attachments,
+  'buildMisEmailUnifiedReportAlign',
+  'Summary Excel must not use a second uiAlign builder'
+);
 
 mustInclude(
   excel,
   'filterTraceRowsForMailBodyOpenExport',
   'Open Calls Excel must use same WRL-mapped opens as body'
 );
-mustNotInclude(
-  excel,
-  'filterTraceRowsForUnifiedOpenExport(payload.traceRows)',
-  'Open Calls Excel must not use unmapped unified opens'
-);
 
-mustInclude(plant, 'rollupCrmOfficesToWrlBranches', 'franchisee offices must roll into WRL parents');
 mustInclude(plant, 'findSapCodeTopLevelBranch', 'SAP 1127/1150 → Guwahati/Ranchi');
-
-mustInclude(
-  body,
-  'branchPerformanceRows !== undefined',
-  'body Regional prefers Branch rollup when Branch rows exist'
-);
 
 console.log('check:mis-mail-formula OK');
