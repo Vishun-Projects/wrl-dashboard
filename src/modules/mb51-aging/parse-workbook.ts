@@ -39,6 +39,7 @@ export const MB51_COLS: Record<string, string[]> = {
   text: ['text'],
   doc: ['materialdocument'],
   plant: ['plant'],
+  amt: ['amtinloccur', 'amountinlocalcurrency', 'amtinlocalcurrency'],
 };
 
 const NEED_KEYS = ['date', 'mat', 'qty'] as const;
@@ -288,6 +289,7 @@ export function parseMb51Workbook(
         mt: ix.mov >= 0 ? String(row[ix.mov] ?? '').trim() : '',
         mtx: ix.movt >= 0 ? String(row[ix.movt] ?? '').trim() : '',
         tx: ix.text >= 0 ? String(row[ix.text] ?? '').trim() : '',
+        amt: ix.amt >= 0 ? parseQty(row[ix.amt]) : null,
       });
       sheetRows++;
     }

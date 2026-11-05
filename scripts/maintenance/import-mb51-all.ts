@@ -98,7 +98,23 @@ const COLS: Record<string, string[]> = {
   text: ['text'],
   doc: ['materialdocument'],
   plant: ['plant'],
+  amt: ['amtinloccur', 'amountinlocalcurrency', 'amtinlocalcurrency'],
 };
+
+function parseAmtCell(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'object' && v !== null && 'result' in v) {
+    return parseAmtCell((v as { result: unknown }).result);
+  }
+  let s = cellText(v).replace(/\s/g, '');
+  if (!s) return null;
+  const paren = /^\((.*)\)$/.exec(s);
+  if (paren) s = `-${paren[1]}`;
+  s = s.replace(/,/g, '');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
 
 function rowValues(row: ExcelJS.Row): unknown[] {
   const values = row.values;
@@ -227,6 +243,7 @@ async function importOneFile(opts: {
         mt: cell('mov'),
         mtx: cell('movt'),
         tx: cell('text'),
+        amt: ix.amt >= 0 ? parseAmtCell(cells[ix.amt]) : null,
       });
       parsed++;
       if (buf.length >= CHUNK) await flush(false);

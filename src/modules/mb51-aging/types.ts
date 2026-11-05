@@ -13,6 +13,8 @@ export type Mb51AgingMovement = {
   mt?: string;    // Movement type
   mtx?: string;   // Movement type text
   tx?: string;    // SAP Text (item text)
+  /** SAP Amt.in Loc.Cur. — local-currency amount (may be negative). */
+  amt?: number | null;
 };
 
 export type Mb51AgingImportMeta = {

@@ -36,8 +36,19 @@ CREATE TABLE IF NOT EXISTS mb51_aging_rows (
 ALTER TABLE mb51_aging_rows
   ADD COLUMN IF NOT EXISTS item_text text NOT NULL DEFAULT '';
 
+ALTER TABLE mb51_aging_rows
+  ADD COLUMN IF NOT EXISTS amt_in_loc_cur numeric(18, 2);
+
+COMMENT ON COLUMN mb51_aging_rows.amt_in_loc_cur IS
+  'SAP Amt.in Loc.Cur. (local-currency amount) from MB51 export.';
+
 CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_import_id
   ON mb51_aging_rows (import_id);
+
+-- Spare-parts cost by call number in Text (warranty claims / parts).
+CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_item_text_amt
+  ON mb51_aging_rows (upper(btrim(item_text)))
+  WHERE btrim(item_text) <> '' AND amt_in_loc_cur IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_mb51_aging_rows_import_seq
   ON mb51_aging_rows (import_id, seq_order);

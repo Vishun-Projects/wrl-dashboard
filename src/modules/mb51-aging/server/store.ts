@@ -166,7 +166,7 @@ async function insertRowBatch(
       const isoDate = serialToIsoDate(row.d);
 
       placeholders.push(
-        `($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`
+        `($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`
       );
       values.push(
         importId,
@@ -184,6 +184,7 @@ async function insertRowBatch(
         row.mt ?? '',
         row.mtx ?? '',
         row.tx ?? '',
+        row.amt ?? null,
         seq
       );
     }
@@ -207,6 +208,7 @@ async function insertRowBatch(
           movement_type,
           movement_type_text,
           item_text,
+          amt_in_loc_cur,
           seq_order
         ) VALUES ${placeholders.join(',')}
         `,
@@ -311,6 +313,7 @@ export async function fetchLatestMb51AgingPage(opts?: {
         movement_type: string;
         movement_type_text: string;
         item_text: string;
+        amt_in_loc_cur: string | null;
         seq_order: number;
       }>(
         `
@@ -328,6 +331,7 @@ export async function fetchLatestMb51AgingPage(opts?: {
         movement_type,
         movement_type_text,
         item_text,
+        amt_in_loc_cur::text AS amt_in_loc_cur,
         seq_order
       FROM mb51_aging_rows
       WHERE import_id = $1
@@ -352,6 +356,7 @@ export async function fetchLatestMb51AgingPage(opts?: {
         mt: r.movement_type,
         mtx: r.movement_type_text,
         tx: r.item_text,
+        amt: r.amt_in_loc_cur != null ? Number(r.amt_in_loc_cur) : null,
         s: r.seq_order,
       }));
 

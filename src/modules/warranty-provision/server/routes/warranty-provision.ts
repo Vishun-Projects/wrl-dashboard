@@ -21,11 +21,14 @@ import {
   buildSnapWorkbook,
   buildUnitsTemplateWorkbook,
 } from '@/modules/warranty-provision/server/excel-export';
+import { loadUserAuth } from '@/lib/auth/load-user-auth';
+import { isSuperAdmin } from '@/lib/auth/rbac-catalog';
 import {
   commitClaims,
   getAssumptions,
   listClaims,
   parseClaimsWorkbook,
+  resyncClaimFacts,
   saveAssumptions,
 } from '@/modules/warranty-provision/server/claims';
 import {
@@ -36,7 +39,7 @@ import { queryWarrantyRates } from '@/modules/warranty-provision/server/rates';
 import { queryWarrantyForecast } from '@/modules/warranty-provision/server/forecast';
 
 export const runtime = 'nodejs';
-export const maxDuration = 120;
+export const maxDuration = 600;
 
 function csvParam(raw: string | null): string[] {
   if (!raw) return [];
@@ -165,6 +168,7 @@ export async function GET(req: NextRequest) {
       const page = Math.max(1, Number(searchParams.get('page') ?? 1) || 1);
       const pageSize = Math.min(200, Math.max(1, Number(searchParams.get('pageSize') ?? 50) || 50));
       const data = await listClaims({
+        periodYm: searchParams.get('periodYm') ?? searchParams.get('asOf') ?? '',
         page,
         pageSize,
         q: (searchParams.get('q') ?? '').trim(),
@@ -295,6 +299,17 @@ export async function POST(req: NextRequest) {
       }
       const result = await commitClaims(body.rows as Parameters<typeof commitClaims>[0]);
       return NextResponse.json(result);
+    }
+
+    if (mode === 'claims-resync') {
+      const userAuth = await loadUserAuth(auth.userId);
+      if (!isSuperAdmin(userAuth?.permissions)) {
+        return NextResponse.json({ error: 'Superadmin only' }, { status: 403 });
+      }
+      const syncedBy =
+        String(userAuth?.profile?.email ?? auth.userId).trim() || auth.userId;
+      const meta = await resyncClaimFacts({ syncedBy });
+      return NextResponse.json(meta);
     }
 
     return NextResponse.json({ error: 'Unknown mode' }, { status: 400 });

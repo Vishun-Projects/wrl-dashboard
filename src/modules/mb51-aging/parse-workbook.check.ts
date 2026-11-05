@@ -31,6 +31,7 @@ assert.equal(parsedSap.rows[0].m, 'MAT-001');
 assert.equal(parsedSap.rows[0].q, 2);
 assert.equal(parsedSap.rows[0].mv, '1140');
 assert.equal(parsedSap.rows[0].dc, '4900123456');
+assert.equal(parsedSap.rows[0].amt, 1000);
 
 const alt = buildMb51TemplateCsv('qty-entry');
 const wbAlt = XLSX.read(alt.csv, { type: 'string' });

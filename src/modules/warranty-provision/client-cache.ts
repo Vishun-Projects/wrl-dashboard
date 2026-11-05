@@ -7,8 +7,12 @@ import type {
   ActiveUnitsResponse,
   BreakdownMfgResponse,
   SnapResponse,
+  WarrantyAssumptions,
+  WarrantyClaimRow,
+  WarrantyForecastResponse,
   WarrantyProvisionOptions,
   WarrantyProvisionRowsResponse,
+  WarrantyRatesResponse,
 } from '@/modules/warranty-provision/types';
 
 const TTL_MS = 30 * 60 * 1000;
@@ -86,4 +90,33 @@ export function unitsCacheKey(qs: string): string {
   return `units:${qs}`;
 }
 
-export type { WarrantyProvisionOptions, WarrantyProvisionRowsResponse };
+export function claimsCacheKey(
+  periodYm: string,
+  q: string,
+  page = 1,
+  pageSize = 50
+): string {
+  return `claims:${periodYm}|q:${q.trim().toLowerCase()}|p:${page}|ps:${pageSize}`;
+}
+
+export function ratesCacheKey(qs: string): string {
+  return `rates:${qs}`;
+}
+
+export function forecastCacheKey(qs: string, scenario: string): string {
+  return `forecast:${qs}|${scenario}`;
+}
+
+export type ClaimsCachePayload = {
+  rows: WarrantyClaimRow[];
+  total: number;
+  meta?: { syncedAt: string | null; rowCount: number; syncedBy: string };
+};
+
+export type {
+  WarrantyAssumptions,
+  WarrantyForecastResponse,
+  WarrantyProvisionOptions,
+  WarrantyProvisionRowsResponse,
+  WarrantyRatesResponse,
+};

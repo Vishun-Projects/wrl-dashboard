@@ -57,7 +57,7 @@ export const CLAIMS_TEMPLATE_HEADERS = [
   'Repair Cost',
   'Spare Parts Cost',
   'Labour Cost',
-  'Replacement Cost',
+  'Traveling Reimbursement',
   'Total Cost',
 ] as const;
 

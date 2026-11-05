@@ -1,6 +1,15 @@
 import ExcelJS from 'exceljs';
 import { withAppClient } from '@/lib/read-model/db';
+import {
+  getClaimFactsMeta,
+  listClaimFacts,
+  resyncClaimFacts,
+  type ClaimFactsMeta,
+} from '@/modules/warranty-provision/server/claim-facts';
 import type { WarrantyAssumptions, WarrantyClaimRow } from '@/modules/warranty-provision/types';
+
+export type { ClaimFactsMeta };
+export { getClaimFactsMeta, resyncClaimFacts };
 
 function pgDate(v: unknown): string | null {
   if (v == null || v === '') return null;
@@ -13,29 +22,6 @@ function pgDate(v: unknown): string | null {
   const s = String(v);
   const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
   return m ? m[1] : null;
-}
-
-function num(v: unknown): number | null {
-  if (v == null || v === '') return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-
-function mapClaim(r: Record<string, unknown>): WarrantyClaimRow {
-  return {
-    id: Number(r.id) || 0,
-    claimNo: String(r.claim_no ?? ''),
-    serialNumber: String(r.serial_number ?? ''),
-    claimDate: pgDate(r.claim_date),
-    defectDescription: String(r.defect_description ?? ''),
-    repairCost: num(r.repair_cost),
-    sparePartsCost: num(r.spare_parts_cost),
-    labourCost: num(r.labour_cost),
-    replacementCost: num(r.replacement_cost),
-    totalCost: num(r.total_cost),
-    unitId: r.unit_id == null ? null : Number(r.unit_id),
-    matchStatus: String(r.match_status ?? 'unmatched'),
-  };
 }
 
 const HEADERS: Record<string, string> = {
@@ -51,6 +37,7 @@ const HEADERS: Record<string, string> = {
   labourcost: 'labour',
   laborcost: 'labour',
   replacementcost: 'replacement',
+  travelingreimbursement: 'replacement',
   totalcost: 'total',
 };
 
@@ -248,36 +235,12 @@ export async function commitClaims(rows: ClaimParseRow[]): Promise<{
 }
 
 export async function listClaims(opts: {
+  periodYm: string;
   page: number;
   pageSize: number;
   q: string;
-}): Promise<{ rows: WarrantyClaimRow[]; total: number }> {
-  return withAppClient(async (client) => {
-    const values: unknown[] = [];
-    let where = '1=1';
-    if (opts.q.trim()) {
-      values.push(`%${opts.q.trim()}%`);
-      where += ` AND (serial_number ILIKE $1 OR claim_no ILIKE $1)`;
-    }
-    const count = await client.query<{ n: string }>(
-      `SELECT count(*)::text AS n FROM warranty_claims WHERE ${where}`,
-      values
-    );
-    const i = values.length + 1;
-    const { rows } = await client.query(
-      `
-      SELECT * FROM warranty_claims
-      WHERE ${where}
-      ORDER BY claim_date DESC NULLS LAST, id DESC
-      LIMIT $${i} OFFSET $${i + 1}
-      `,
-      [...values, opts.pageSize, (opts.page - 1) * opts.pageSize]
-    );
-    return {
-      rows: rows.map((r) => mapClaim(r as Record<string, unknown>)),
-      total: Number(count.rows[0]?.n ?? 0) || 0,
-    };
-  });
+}): Promise<{ rows: WarrantyClaimRow[]; total: number; meta: ClaimFactsMeta }> {
+  return listClaimFacts(opts);
 }
 
 export async function getAssumptions(): Promise<WarrantyAssumptions> {

@@ -56,7 +56,8 @@ export type WarrantyClaimRow = {
   repairCost: number | null;
   sparePartsCost: number | null;
   labourCost: number | null;
-  replacementCost: number | null;
+  /** Travel cost from ARCP provision (was Replacement Cost). */
+  travelingReimbursement: number | null;
   totalCost: number | null;
   unitId: number | null;
   matchStatus: string;

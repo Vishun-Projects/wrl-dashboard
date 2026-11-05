@@ -7,16 +7,19 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type RefObject,
 } from 'react';
-import { ChevronLeft, ChevronRight, Download, Shield, Upload, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Copy, Download, RefreshCw, Shield, Upload, X } from 'lucide-react';
 import { PageShell } from '@/components/layout/PageShell';
 import { AdminTable, AdminTd, AdminTh, AdminThead, AdminTr } from '@/components/admin/AdminUi';
 import { FilterSelect } from '@/components/filters/FilterSelect';
 import type { FilterSelectOption } from '@/components/filters/filter-select-types';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
 import { ModalPortal } from '@/components/ui/ModalPortal';
+import { useUser } from '@/components/layout/DashboardLayout';
 import { feedback } from '@/lib/ui/feedback';
 import { formatUiDate } from '@/lib/dates/ui-date';
+import { isSuperAdmin } from '@/lib/auth/rbac-catalog';
 import {
   asOfFromPeriodYm,
   fyStartYear,
@@ -26,8 +29,12 @@ import {
   cacheClearWarranty,
   cacheGet,
   cacheSet,
+  claimsCacheKey,
+  forecastCacheKey,
+  ratesCacheKey,
   snapCacheKey,
   unitsCacheKey,
+  type ClaimsCachePayload,
   type SnapBundle,
 } from '@/modules/warranty-provision/client-cache';
 import type {
@@ -46,7 +53,9 @@ import type {
 
 const API = '/api/report/warranty-provision';
 const PAGE_SIZES = [100, 250, 500, 1000] as const;
+const CLAIMS_PAGE_SIZES = [50, 100, 200] as const;
 type Tab = 'snap' | 'units' | 'rates' | 'forecast' | 'claims' | 'assumptions';
+type ClaimsMeta = { syncedAt: string | null; rowCount: number; syncedBy: string };
 type CellSel = { colLo: number; colHi: number; rowLo: number; rowHi: number };
 
 const CELL_SEL_CLS = '!bg-sky-200';
@@ -76,6 +85,62 @@ function yearOptsAround(periodYm: string): number[] {
   const out: number[] = [];
   for (let y = to; y >= from; y--) out.push(y);
   return out;
+}
+
+function cellPlain(el: Element | null | undefined): string {
+  return ((el as HTMLElement | null)?.innerText ?? el?.textContent ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Full table (thead + tbody) → TSV + HTML for Excel paste. */
+function tableClipboardPayload(root: HTMLElement): { plain: string; html: string } | null {
+  const table = root.querySelector('table');
+  if (!table) return null;
+  const lines: string[] = [];
+  const rowsHtml: string[] = [];
+  const pushRow = (cells: Element[]) => {
+    const texts = cells.map((c) => cellPlain(c));
+    if (texts.every((t) => !t)) return;
+    lines.push(texts.join('\t'));
+    rowsHtml.push(
+      `<tr>${texts
+        .map((t) => `<td>${t.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</td>`)
+        .join('')}</tr>`
+    );
+  };
+  const ths = table.querySelectorAll('thead tr:first-child th, thead tr:first-child td');
+  if (ths.length) pushRow([...ths]);
+  table.querySelectorAll('tbody tr').forEach((tr) => {
+    pushRow([...tr.querySelectorAll('td')]);
+  });
+  const plain = lines.join('\n');
+  if (!plain) return null;
+  return { plain, html: `<table>${rowsHtml.join('')}</table>` };
+}
+
+async function copyTableRoot(root: HTMLElement | null): Promise<void> {
+  if (!root) return;
+  const payload = tableClipboardPayload(root);
+  if (!payload) {
+    feedback.actionFailed('Nothing to copy');
+    return;
+  }
+  try {
+    if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/plain': new Blob([payload.plain], { type: 'text/plain' }),
+          'text/html': new Blob([payload.html], { type: 'text/html' }),
+        }),
+      ]);
+    } else {
+      await navigator.clipboard.writeText(payload.plain);
+    }
+    feedback.actionSuccess('Table copied');
+  } catch {
+    feedback.actionFailed('Copy failed');
+  }
 }
 
 function pickSingle(values: string[]): string {
@@ -109,6 +174,10 @@ function inrMoneyExact(n: number): string {
 }
 
 export default function WarrantyProvisionPageClient() {
+  const { userProfile } = useUser();
+  const canResyncClaims = isSuperAdmin(
+    (userProfile?.permissions ?? []) as string[]
+  );
   const [tab, setTab] = useState<Tab>('snap');
   const [periodYm, setPeriodYm] = useState(prevPeriodYmIst);
   const asOf = useMemo(() => asOfFromPeriodYm(periodYm), [periodYm]);
@@ -124,6 +193,14 @@ export default function WarrantyProvisionPageClient() {
   const [warrantyEndFy, setWarrantyEndFy] = useState('');
   const [status, setStatus] = useState('');
   const [q, setQ] = useState('');
+  /** Claims search draft — debounced into claimsQ before fetch. */
+  const [claimsQDraft, setClaimsQDraft] = useState('');
+  const [claimsQ, setClaimsQ] = useState('');
+  const [claimsPage, setClaimsPage] = useState(1);
+  const [claimsPageSize, setClaimsPageSize] =
+    useState<(typeof CLAIMS_PAGE_SIZES)[number]>(50);
+  const [claimsMeta, setClaimsMeta] = useState<ClaimsMeta | null>(null);
+  const [claimsResyncing, setClaimsResyncing] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(100);
 
@@ -150,7 +227,7 @@ export default function WarrantyProvisionPageClient() {
   const [claims, setClaims] = useState<{ rows: WarrantyClaimRow[]; total: number } | null>(null);
   const [assumptions, setAssumptions] = useState<WarrantyAssumptions | null>(null);
   const [loading, setLoading] = useState(true);
-  const [claimPreview, setClaimPreview] = useState<string>('');
+  const [loadingLabel, setLoadingLabel] = useState('Loading…');
   const [unitsImportStatus, setUnitsImportStatus] = useState<string>('');
 
   /** Rectangular cell select (browser table select always grabs whole rows). */
@@ -199,6 +276,7 @@ export default function WarrantyProvisionPageClient() {
   const loadSnap = useCallback(async () => {
     const key = snapCacheKey(snapQs.toString(), asOf, periodYm);
     const cached = cacheGet<SnapBundle>(key);
+    setLoadingLabel('Loading SNAP / breakdown…');
     if (cached) {
       setSnap(cached.snap);
       setActiveUnits(cached.active);
@@ -305,6 +383,7 @@ export default function WarrantyProvisionPageClient() {
     if (q.trim()) params.set('q', q.trim());
     const key = unitsCacheKey(params.toString());
     const cached = cacheGet<WarrantyProvisionRowsResponse>(key);
+    setLoadingLabel('Loading units…');
     if (cached) {
       setRowsData(cached);
       setLoading(false);
@@ -337,8 +416,9 @@ export default function WarrantyProvisionPageClient() {
   ]);
 
   const loadRates = useCallback(async () => {
-    const key = `rates:${snapQs}`;
+    const key = ratesCacheKey(snapQs.toString());
     const cached = cacheGet<WarrantyRatesResponse>(key);
+    setLoadingLabel('Loading claim rates…');
     if (cached) {
       setRates(cached);
       setLoading(false);
@@ -360,8 +440,9 @@ export default function WarrantyProvisionPageClient() {
     const p = new URLSearchParams(snapQs);
     p.set('mode', 'forecast');
     p.set('scenario', scenario);
-    const key = `forecast:${p}`;
+    const key = forecastCacheKey(snapQs.toString(), scenario);
     const cached = cacheGet<WarrantyForecastResponse>(key);
+    setLoadingLabel('Loading cost forecast…');
     if (cached) {
       setForecast(cached);
       setLoading(false);
@@ -380,21 +461,76 @@ export default function WarrantyProvisionPageClient() {
   }, [snapQs, scenario]);
 
   const loadClaims = useCallback(async () => {
-    setLoading(true);
+    const key = claimsCacheKey(periodYm, claimsQ, claimsPage, claimsPageSize);
+    const cached = cacheGet<ClaimsCachePayload>(key);
+    setLoadingLabel(
+      claimsQ.trim()
+        ? `Searching claims for “${claimsQ.trim()}”…`
+        : `Loading claims for ${periodYm}…`
+    );
+    if (cached) {
+      setClaims(cached);
+      if (cached.meta) setClaimsMeta(cached.meta);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     try {
-      const res = await fetch(`${API}?mode=claims&page=1&pageSize=50&q=${encodeURIComponent(q)}`, {
-        credentials: 'include',
-      });
+      const res = await fetch(
+        `${API}?mode=claims&periodYm=${encodeURIComponent(periodYm)}&page=${claimsPage}&pageSize=${claimsPageSize}&q=${encodeURIComponent(claimsQ)}`,
+        { credentials: 'include' }
+      );
       if (!res.ok) throw new Error('Claims load failed');
-      setClaims((await res.json()) as { rows: WarrantyClaimRow[]; total: number });
+      const data = (await res.json()) as ClaimsCachePayload;
+      setClaims(data);
+      if (data.meta) setClaimsMeta(data.meta);
+      cacheSet(key, data);
     } catch (e) {
-      feedback.actionFailed(e instanceof Error ? e.message : 'Claims failed');
+      if (!cached) feedback.actionFailed(e instanceof Error ? e.message : 'Claims failed');
     } finally {
       setLoading(false);
     }
-  }, [q]);
+  }, [periodYm, claimsQ, claimsPage, claimsPageSize]);
+
+  const resyncClaims = useCallback(async () => {
+    if (!canResyncClaims || claimsResyncing) return;
+    setClaimsResyncing(true);
+    setLoadingLabel('Resyncing claims from Call Register / ARCP / MB51…');
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}?mode=claims-resync`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      const data = (await res.json()) as ClaimsMeta & { error?: string };
+      if (!res.ok) throw new Error(data.error || 'Resync failed');
+      setClaimsMeta(data);
+      cacheClearWarranty();
+      feedback.actionSuccess(
+        `Claims synced · ${(data.rowCount ?? 0).toLocaleString('en-IN')} rows`
+      );
+      setClaimsPage(1);
+      const listRes = await fetch(
+        `${API}?mode=claims&periodYm=${encodeURIComponent(periodYm)}&page=1&pageSize=${claimsPageSize}&q=${encodeURIComponent(claimsQ)}`,
+        { credentials: 'include' }
+      );
+      if (!listRes.ok) throw new Error('Claims reload failed');
+      const listData = (await listRes.json()) as ClaimsCachePayload;
+      setClaims(listData);
+      if (listData.meta) setClaimsMeta(listData.meta);
+      cacheSet(claimsCacheKey(periodYm, claimsQ, 1, claimsPageSize), listData);
+    } catch (e) {
+      feedback.actionFailed(e instanceof Error ? e.message : 'Resync failed');
+    } finally {
+      setClaimsResyncing(false);
+      setLoading(false);
+    }
+  }, [canResyncClaims, claimsResyncing, periodYm, claimsPageSize, claimsQ]);
 
   const loadAssumptions = useCallback(async () => {
+    setLoadingLabel('Loading assumptions…');
     setLoading(true);
     try {
       const res = await fetch(`${API}?mode=assumptions`, { credentials: 'include' });
@@ -408,9 +544,26 @@ export default function WarrantyProvisionPageClient() {
   }, []);
 
   useEffect(() => {
-    if (tab === 'snap') void loadSnap();
-    else if (tab === 'units') void loadUnits();
-    else if (tab === 'rates') void loadRates();
+    const t = window.setTimeout(() => {
+      const next = claimsQDraft.trim();
+      setClaimsQ(next);
+      setClaimsPage(1);
+    }, 350);
+    return () => window.clearTimeout(t);
+  }, [claimsQDraft]);
+
+  useEffect(() => {
+    setClaimsPage(1);
+  }, [periodYm]);
+
+  useEffect(() => {
+    if (tab === 'snap') {
+      setLoadingLabel('Loading SNAP / breakdown…');
+      void loadSnap();
+    } else if (tab === 'units') {
+      setLoadingLabel('Loading units…');
+      void loadUnits();
+    } else if (tab === 'rates') void loadRates();
     else if (tab === 'forecast') void loadForecast();
     else if (tab === 'claims') void loadClaims();
     else if (tab === 'assumptions') void loadAssumptions();
@@ -429,7 +582,7 @@ export default function WarrantyProvisionPageClient() {
   }, []);
 
   // Drag clears the native selection, so Ctrl+C won't hit a focused table onCopy —
-  // listen on document and write TSV (+ HTML table) from the highlighted range.
+  // listen on document and write TSV (+ HTML table) from the highlighted range (with header).
   useEffect(() => {
     if (!colSel) return;
     const onCopy = (e: ClipboardEvent) => {
@@ -438,14 +591,25 @@ export default function WarrantyProvisionPageClient() {
       if (!sel || !root) return;
       const lines: string[] = [];
       const rowsHtml: string[] = [];
+      const thRow = root.querySelector('thead tr');
+      if (thRow) {
+        const headers: string[] = [];
+        const ths: string[] = [];
+        for (let c = sel.colLo; c <= sel.colHi; c++) {
+          const text = cellPlain(thRow.children[c]);
+          headers.push(text);
+          ths.push(`<th>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</th>`);
+        }
+        lines.push(headers.join('\t'));
+        rowsHtml.push(`<tr>${ths.join('')}</tr>`);
+      }
       for (let r = sel.rowLo; r <= sel.rowHi; r++) {
         const tr = root.querySelector(`tbody tr[data-row-index="${r}"]`);
         if (!tr) continue;
         const cells: string[] = [];
         const tds: string[] = [];
         for (let c = sel.colLo; c <= sel.colHi; c++) {
-          const td = tr.children[c] as HTMLElement | undefined;
-          const text = (td?.innerText ?? td?.textContent ?? '').replace(/\s+/g, ' ').trim();
+          const text = cellPlain(tr.children[c]);
           cells.push(text);
           tds.push(`<td>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</td>`);
         }
@@ -461,6 +625,29 @@ export default function WarrantyProvisionPageClient() {
     document.addEventListener('copy', onCopy);
     return () => document.removeEventListener('copy', onCopy);
   }, [colSel]);
+
+  const snapGridRef = useRef<HTMLDivElement>(null);
+  const activeGridRef = useRef<HTMLDivElement>(null);
+  const breakdownGridRef = useRef<HTMLDivElement>(null);
+  const breakdownWcoGridRef = useRef<HTMLDivElement>(null);
+  const unitsGridRef = useRef<HTMLDivElement>(null);
+
+  function copyTableBtn(gridRef: RefObject<HTMLDivElement | null>) {
+    return (
+      <button
+        type="button"
+        title="Copy table (with headers)"
+        onClick={(e) => {
+          e.stopPropagation();
+          void copyTableRoot(gridRef.current);
+        }}
+        className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-700 hover:bg-slate-50"
+      >
+        <Copy className="h-3 w-3" />
+        Copy
+      </button>
+    );
+  }
 
   function gridSelectHandlers(gridId: string) {
     return {
@@ -544,6 +731,8 @@ export default function WarrantyProvisionPageClient() {
   const rows: WarrantyProvisionRow[] = rowsData?.rows ?? [];
   const total = rowsData?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const claimsTotal = claims?.total ?? 0;
+  const claimsTotalPages = Math.max(1, Math.ceil(claimsTotal / claimsPageSize));
 
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: 'snap', label: 'SNAP Report' },
@@ -581,20 +770,6 @@ export default function WarrantyProvisionPageClient() {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `Warranty_Forecast_${asOf}.xlsx`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }
-
-  async function downloadClaimsTemplate() {
-    const res = await fetch(`${API}?mode=claims-template`, { credentials: 'include' });
-    if (!res.ok) {
-      feedback.actionFailed('Template download failed');
-      return;
-    }
-    const blob = await res.blob();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'Warranty_Claims_Template.xlsx';
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -642,51 +817,6 @@ export default function WarrantyProvisionPageClient() {
       void loadSnap();
     } catch (e) {
       setUnitsImportStatus('');
-      feedback.actionFailed(e instanceof Error ? e.message : 'Import failed');
-    }
-  }
-
-  async function onClaimsFile(file: File | null) {
-    if (!file) return;
-    const fd = new FormData();
-    fd.append('file', file);
-    setClaimPreview('Reading…');
-    try {
-      const res = await fetch(`${API}?mode=claims-preview`, {
-        method: 'POST',
-        credentials: 'include',
-        body: fd,
-      });
-      const data = (await res.json()) as {
-        error?: string;
-        valid?: number;
-        errorCount?: number;
-        rows?: unknown[];
-      };
-      if (!res.ok) throw new Error(data.error || 'Preview failed');
-      setClaimPreview(
-        `${(data.valid ?? 0).toLocaleString('en-IN')} valid · ${(data.errorCount ?? 0).toLocaleString('en-IN')} rejected`
-      );
-      if (data.rows?.length) {
-        const commit = await fetch(`${API}?mode=claims-commit`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rows: data.rows }),
-        });
-        const result = (await commit.json()) as {
-          error?: string;
-          inserted?: number;
-          matched?: number;
-        };
-        if (!commit.ok) throw new Error(result.error || 'Commit failed');
-        feedback.actionSuccess(
-          `Imported ${result.inserted ?? 0} claims (${result.matched ?? 0} matched)`
-        );
-        void loadClaims();
-      }
-    } catch (e) {
-      setClaimPreview('');
       feedback.actionFailed(e instanceof Error ? e.message : 'Import failed');
     }
   }
@@ -786,6 +916,20 @@ export default function WarrantyProvisionPageClient() {
       }
     >
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden p-2">
+        {loading ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="flex shrink-0 items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] text-sky-900"
+          >
+            <span
+              className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-sky-400 border-t-transparent"
+              aria-hidden
+            />
+            <span className="font-medium">{loadingLabel}</span>
+            <span className="text-sky-700/80">Please wait — large joins can take a few seconds.</span>
+          </div>
+        ) : null}
         {tab === 'snap' && (
           <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
             <div className="flex shrink-0 flex-wrap items-end gap-2 px-1">
@@ -825,13 +969,20 @@ export default function WarrantyProvisionPageClient() {
                     : ''}
               </span>
             </div>
-            <div className="flex min-h-0 flex-1 items-stretch gap-3 overflow-x-auto overflow-y-hidden custom-scrollbar">
+            <div className="flex min-h-0 w-full flex-1 items-stretch gap-3 overflow-x-auto overflow-y-hidden custom-scrollbar">
               <div
-                className="wp-copy-grid flex min-h-0 shrink-0 flex-col overflow-hidden rounded-xl border border-slate-300 bg-bg-canvas"
+                ref={snapGridRef}
+                className="wp-copy-grid flex min-h-0 min-w-0 flex-[2] flex-col overflow-hidden rounded-xl border border-slate-300 bg-bg-canvas"
                 {...gridSelectHandlers('snap')}
               >
+                <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
+                  <div className="min-w-0 text-[12px] font-semibold text-slate-800">
+                    SNAP coverage
+                  </div>
+                  {copyTableBtn(snapGridRef)}
+                </div>
                 <div className="min-h-0 flex-1 overflow-auto custom-scrollbar">
-                  <AdminTable className="min-w-max border-collapse text-[14px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2.5 [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:text-[14px] [&_tr]:border-0">
+                  <AdminTable className="w-full border-collapse text-[14px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2.5 [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:text-[14px] [&_tr]:border-0">
                     <AdminThead>
                       <tr>
                         <AdminTh>Billing year</AdminTh>
@@ -898,20 +1049,23 @@ export default function WarrantyProvisionPageClient() {
               </div>
 
               <div
-                className="wp-copy-grid flex min-h-0 shrink-0 flex-col overflow-hidden rounded-xl border border-slate-300 bg-bg-canvas"
+                ref={activeGridRef}
+                className="wp-copy-grid flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-300 bg-bg-canvas"
                 {...gridSelectHandlers('active')}
               >
-                <div className="shrink-0 border-b border-slate-200 px-3 py-2">
-                  <div className="text-[12px] font-semibold text-slate-800">
-                    Active units by year
+                <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-semibold text-slate-800">
+                      Active units by year
+                    </div>
+                    <div className="mt-0.5 text-[11px] leading-snug text-slate-500">
+                      Active = end &gt; as-of · Mfg = LEN(serial)=14 → MID+2000 else billing year
+                    </div>
                   </div>
-                  <div className="mt-0.5 text-[11px] text-slate-500">
-                    Active = end &gt; as-of · Mfg = LEN(serial)=14 → MID(serial,6,2)+2000 else
-                    YEAR(billing date)
-                  </div>
+                  {copyTableBtn(activeGridRef)}
                 </div>
                 <div className="min-h-0 flex-1 overflow-auto custom-scrollbar">
-                  <AdminTable className="min-w-max border-collapse text-[14px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2.5 [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:text-[14px] [&_tr]:border-0">
+                  <AdminTable className="w-full border-collapse text-[14px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2.5 [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:text-[14px] [&_tr]:border-0">
                     <AdminThead>
                       <tr>
                         <AdminTh>Year</AdminTh>
@@ -968,19 +1122,23 @@ export default function WarrantyProvisionPageClient() {
               </div>
 
               <div
-                className="wp-copy-grid flex min-h-0 shrink-0 flex-col overflow-hidden rounded-xl border border-slate-300 bg-bg-canvas"
+                ref={breakdownGridRef}
+                className="wp-copy-grid flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-300 bg-bg-canvas"
                 {...gridSelectHandlers('breakdown')}
               >
-                <div className="shrink-0 border-b border-slate-200 px-3 py-2">
-                  <div className="text-[12px] font-semibold text-slate-800">
-                    Breakdown solved · machines by mfg year
+                <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-semibold text-slate-800">
+                      Breakdown solved · machines by mfg year
+                    </div>
+                    <div className="mt-0.5 text-[11px] leading-snug text-slate-500">
+                      14-digit · Active WP · click year for calls
+                    </div>
                   </div>
-                  <div className="mt-0.5 text-[11px] text-slate-500">
-                    14-digit serials only · Active in warranty provision · click year for calls
-                  </div>
+                  {copyTableBtn(breakdownGridRef)}
                 </div>
                 <div className="min-h-0 flex-1 overflow-auto custom-scrollbar">
-                  <AdminTable className="min-w-max border-collapse text-[14px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2.5 [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:text-[14px] [&_tr]:border-0">
+                  <AdminTable className="w-full border-collapse text-[14px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2.5 [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:text-[14px] [&_tr]:border-0">
                     <AdminThead>
                       <tr>
                         <AdminTh>Mfg year</AdminTh>
@@ -1029,19 +1187,23 @@ export default function WarrantyProvisionPageClient() {
               </div>
 
               <div
-                className="wp-copy-grid flex min-h-0 shrink-0 flex-col overflow-hidden rounded-xl border border-slate-300 bg-bg-canvas"
+                ref={breakdownWcoGridRef}
+                className="wp-copy-grid flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-300 bg-bg-canvas"
                 {...gridSelectHandlers('breakdown-wco')}
               >
-                <div className="shrink-0 border-b border-slate-200 px-3 py-2">
-                  <div className="text-[12px] font-semibold text-slate-800">
-                    Breakdown solved · CRM WCO=W · by mfg year
+                <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-semibold text-slate-800">
+                      Breakdown solved · CRM WCO=W · by mfg year
+                    </div>
+                    <div className="mt-0.5 text-[11px] leading-snug text-slate-500">
+                      hot · WCO=W · 14-digit · click year for calls
+                    </div>
                   </div>
-                  <div className="mt-0.5 text-[11px] text-slate-500">
-                    calls_latest_hot · WCO=W · 14-digit serials · click year for calls
-                  </div>
+                  {copyTableBtn(breakdownWcoGridRef)}
                 </div>
                 <div className="min-h-0 flex-1 overflow-auto custom-scrollbar">
-                  <AdminTable className="min-w-max border-collapse text-[14px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2.5 [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:text-[14px] [&_tr]:border-0">
+                  <AdminTable className="w-full border-collapse text-[14px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2.5 [&_th]:text-[13px] [&_th]:font-semibold [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:text-[14px] [&_tr]:border-0">
                     <AdminThead>
                       <tr>
                         <AdminTh>Mfg year</AdminTh>
@@ -1303,11 +1465,13 @@ export default function WarrantyProvisionPageClient() {
                 placeholder="Search…"
                 className="h-8 w-44 rounded border border-slate-200 px-2 text-[12px]"
               />
-              <span className="ml-auto text-[12px] text-slate-500">
+              <span className="ml-auto flex items-center gap-2 text-[12px] text-slate-500">
                 {loading ? 'Loading…' : `${total.toLocaleString('en-IN')} row(s)`}
+                {copyTableBtn(unitsGridRef)}
               </span>
             </div>
             <div
+              ref={unitsGridRef}
               className="wp-copy-grid min-h-0 flex-1 overflow-auto rounded-xl border border-slate-200 bg-bg-canvas custom-scrollbar"
               {...gridSelectHandlers('units')}
             >
@@ -1615,48 +1779,83 @@ export default function WarrantyProvisionPageClient() {
         {tab === 'claims' && (
           <div className="min-h-0 flex-1 space-y-2 overflow-auto p-1">
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void downloadClaimsTemplate()}
-                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[12px]"
-              >
-                <Download className="h-3.5 w-3.5" />
-                Download template
-              </button>
-              <label className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[12px]">
-                <Upload className="h-3.5 w-3.5" />
-                Import claims .xlsx
-                <input
-                  type="file"
-                  accept=".xlsx"
-                  className="hidden"
-                  onChange={(e) => void onClaimsFile(e.target.files?.[0] ?? null)}
-                />
-              </label>
-              <span className="text-[12px] text-slate-500">{claimPreview}</span>
+              <span className="text-[12px] text-slate-500">
+                Stored claims
+                {claimsMeta?.syncedAt
+                  ? ` · last sync ${formatUiDate(claimsMeta.syncedAt)} · ${claimsMeta.rowCount.toLocaleString('en-IN')} total`
+                  : ' · not synced yet'}
+                {' · '}
+                {loading ? '…' : `${claimsTotal.toLocaleString('en-IN')} in ${periodYm}`}
+              </span>
+              {canResyncClaims ? (
+                <button
+                  type="button"
+                  onClick={() => void resyncClaims()}
+                  disabled={loading || claimsResyncing}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] disabled:opacity-50"
+                >
+                  <RefreshCw
+                    className={`h-3.5 w-3.5 ${claimsResyncing ? 'animate-spin' : ''}`}
+                  />
+                  {claimsResyncing ? 'Resyncing…' : 'Resync'}
+                </button>
+              ) : null}
               <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
+                value={claimsQDraft}
+                onChange={(e) => setClaimsQDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    setClaimsQ(claimsQDraft.trim());
+                    setClaimsPage(1);
+                  }
+                }}
                 placeholder="Search claim / serial"
                 className="ml-auto h-8 w-48 rounded border border-slate-200 px-2 text-[12px]"
+                disabled={loading || claimsResyncing}
               />
             </div>
+            {!claimsMeta?.syncedAt && !loading ? (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
+                No synced claims yet
+                {canResyncClaims
+                  ? ' — click Resync to build the table from Call Register, ARCP, and MB51.'
+                  : ' — ask a superadmin to run Resync.'}
+              </p>
+            ) : null}
             <AdminTable>
               <AdminThead>
                 <tr>
                   <AdminTh>Claim No</AdminTh>
                   <AdminTh>Serial</AdminTh>
                   <AdminTh>Date</AdminTh>
+                  <AdminTh>Defect</AdminTh>
+                  <AdminTh align="right">Repair Cost</AdminTh>
+                  <AdminTh align="right">Traveling Reimbursement</AdminTh>
+                  <AdminTh align="right">Spare Parts</AdminTh>
                   <AdminTh align="right">Total</AdminTh>
                   <AdminTh>Match</AdminTh>
                 </tr>
               </AdminThead>
               <tbody>
                 {(claims?.rows ?? []).map((c) => (
-                  <AdminTr key={c.id}>
+                  <AdminTr key={c.claimNo || c.id}>
                     <AdminTd>{c.claimNo}</AdminTd>
                     <AdminTd className="font-mono text-[11px]">{c.serialNumber}</AdminTd>
                     <AdminTd>{c.claimDate ? formatUiDate(c.claimDate) : '—'}</AdminTd>
+                    <AdminTd className="max-w-[14rem] truncate" title={c.defectDescription}>
+                      {c.defectDescription || '—'}
+                    </AdminTd>
+                    <AdminTd align="right">
+                      {c.repairCost != null ? inrMoney(c.repairCost) : '—'}
+                    </AdminTd>
+                    <AdminTd align="right">
+                      {c.travelingReimbursement != null
+                        ? inrMoney(c.travelingReimbursement)
+                        : '—'}
+                    </AdminTd>
+                    <AdminTd align="right">
+                      {c.sparePartsCost != null ? inrMoney(c.sparePartsCost) : '—'}
+                    </AdminTd>
                     <AdminTd align="right">
                       {c.totalCost != null ? inrMoney(c.totalCost) : '—'}
                     </AdminTd>
@@ -1665,6 +1864,47 @@ export default function WarrantyProvisionPageClient() {
                 ))}
               </tbody>
             </AdminTable>
+            <div className="flex flex-wrap items-center gap-2 px-1 pb-1">
+              <label className="text-[12px] text-slate-500">
+                Rows
+                <select
+                  value={claimsPageSize}
+                  onChange={(e) => {
+                    setClaimsPage(1);
+                    setClaimsPageSize(
+                      Number(e.target.value) as (typeof CLAIMS_PAGE_SIZES)[number]
+                    );
+                  }}
+                  className="ml-1 h-8 rounded border border-slate-200 px-2 text-[12px]"
+                  disabled={loading}
+                >
+                  {CLAIMS_PAGE_SIZES.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span className="text-[12px] text-slate-500">
+                Page {claimsPage} / {claimsTotalPages}
+              </span>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-[12px] disabled:opacity-40"
+                disabled={claimsPage <= 1 || loading}
+                onClick={() => setClaimsPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-[12px] disabled:opacity-40"
+                disabled={claimsPage >= claimsTotalPages || loading}
+                onClick={() => setClaimsPage((p) => p + 1)}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         )}
 
@@ -1672,24 +1912,32 @@ export default function WarrantyProvisionPageClient() {
           <div className="max-w-xl space-y-3 overflow-auto p-2 text-[12px]">
             {(
               [
-                ['inflationPct', 'Annual inflation %'],
-                ['discountPct', 'Discount rate %'],
-                ['optimisticProbMult', 'Optimistic probability mult'],
-                ['optimisticCostMult', 'Optimistic cost mult'],
-                ['pessimisticProbMult', 'Pessimistic probability mult'],
-                ['pessimisticCostMult', 'Pessimistic cost mult'],
-                ['existingProvision', 'Existing provision balance'],
+                ['inflationPct', 'Annual inflation %', 'pct'],
+                ['discountPct', 'Discount rate %', 'pct'],
+                ['optimisticProbMult', 'Optimistic probability %', 'multPct'],
+                ['optimisticCostMult', 'Optimistic cost %', 'multPct'],
+                ['pessimisticProbMult', 'Pessimistic probability %', 'multPct'],
+                ['pessimisticCostMult', 'Pessimistic cost %', 'multPct'],
+                ['existingProvision', 'Existing provision balance', 'money'],
               ] as const
-            ).map(([key, label]) => (
+            ).map(([key, label, kind]) => (
               <label key={key} className="flex items-center justify-between gap-3">
                 <span>{label}</span>
                 <input
                   type="number"
-                  step="0.01"
-                  value={assumptions[key]}
-                  onChange={(e) =>
-                    setAssumptions({ ...assumptions, [key]: Number(e.target.value) })
+                  step={kind === 'multPct' ? '1' : '0.01'}
+                  value={
+                    kind === 'multPct'
+                      ? Math.round(Number(assumptions[key]) * 1000) / 10
+                      : assumptions[key]
                   }
+                  onChange={(e) => {
+                    const raw = Number(e.target.value);
+                    setAssumptions({
+                      ...assumptions,
+                      [key]: kind === 'multPct' ? raw / 100 : raw,
+                    });
+                  }}
                   className="h-8 w-32 rounded border border-slate-200 px-2"
                 />
               </label>
