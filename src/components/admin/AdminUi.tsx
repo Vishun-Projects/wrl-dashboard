@@ -201,11 +201,13 @@ export function AdminTd({
   className = '',
   align = 'left',
   title,
+  onClick,
 }: {
   children: React.ReactNode;
   className?: string;
   align?: 'left' | 'right' | 'center';
   title?: string;
+  onClick?: (e: React.MouseEvent<HTMLTableCellElement>) => void;
 }) {
   const alignClass =
     align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left';
@@ -213,6 +215,7 @@ export function AdminTd({
     <td
       className={`px-3 py-1.5 align-middle text-[12px] text-slate-700 ${alignClass} ${className}`}
       title={title}
+      onClick={onClick}
     >
       {children}
     </td>

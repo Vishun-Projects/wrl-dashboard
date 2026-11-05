@@ -20,6 +20,8 @@ import {
 } from '@/modules/warranty-provision/server/mismatch-facts';
 import { fyStartYear, parsePeriodYm, todayIsoIst } from '@/modules/warranty-provision/fy';
 import {
+  buildActiveUnitsWorkbook,
+  buildBreakdownDetailWorkbook,
   buildClaimsTemplateWorkbook,
   buildForecastWorkbook,
   buildMismatchWorkbook,
@@ -92,10 +94,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(snap);
     }
 
-    if (mode === 'active-units') {
-      return NextResponse.json(
-        await queryActiveUnitsByYear(parseAsOf(searchParams.get('asOf')))
-      );
+    if (mode === 'active-units' || mode === 'active-units-export') {
+      const data = await queryActiveUnitsByYear(parseAsOf(searchParams.get('asOf')));
+      if (mode === 'active-units-export') {
+        const buffer = await buildActiveUnitsWorkbook(data);
+        return new NextResponse(new Uint8Array(buffer), {
+          headers: {
+            'Content-Type':
+              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition': `attachment; filename="Warranty_ActiveUnits_${data.asOf}.xlsx"`,
+          },
+        });
+      }
+      return NextResponse.json(data);
     }
 
     if (mode === 'breakdown-mfg') {
@@ -108,16 +119,49 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(await queryBreakdownMfgByYearCrmW(periodYm));
     }
 
-    if (mode === 'breakdown-mfg-detail') {
+    if (
+      mode === 'breakdown-mfg-detail' ||
+      mode === 'breakdown-mfg-detail-export' ||
+      mode === 'breakdown-mfg-wco-detail' ||
+      mode === 'breakdown-mfg-wco-detail-export'
+    ) {
       const periodYm = searchParams.get('periodYm') ?? searchParams.get('asOf') ?? '';
-      const year = searchParams.get('year') ?? 'NA';
-      return NextResponse.json(await queryBreakdownMfgDetail(periodYm, year));
-    }
-
-    if (mode === 'breakdown-mfg-wco-detail') {
-      const periodYm = searchParams.get('periodYm') ?? searchParams.get('asOf') ?? '';
-      const year = searchParams.get('year') ?? 'NA';
-      return NextResponse.json(await queryBreakdownMfgDetailCrmW(periodYm, year));
+      const exportMode = mode.endsWith('-export');
+      // UI drill always passes a 4-digit year; export may use year=ALL for full dump.
+      const yearRaw = searchParams.get('year');
+      const year = exportMode
+        ? (yearRaw && yearRaw.trim() ? yearRaw : 'ALL')
+        : (yearRaw ?? 'NA');
+      const major = searchParams.get('major') ?? '';
+      const crm = mode.includes('wco');
+      const page = Math.max(1, Number(searchParams.get('page') ?? 1) || 1);
+      const pageSize = Math.min(
+        500,
+        Math.max(1, Number(searchParams.get('pageSize') ?? 100) || 100)
+      );
+      const opts = exportMode ? { all: true as const } : { page, pageSize };
+      const data = crm
+        ? await queryBreakdownMfgDetailCrmW(periodYm, year, major, opts)
+        : await queryBreakdownMfgDetail(periodYm, year, major, opts);
+      if (exportMode) {
+        const buffer = await buildBreakdownDetailWorkbook(data);
+        const tag =
+          data.majorFilter === 'major'
+            ? '_Major'
+            : data.majorFilter === 'minor'
+              ? '_Minor'
+              : '';
+        const basis = crm ? 'CRM_WCO' : 'Active_WP';
+        const yTag = data.yearKey === 'ALL' ? 'AllYears' : `Y${data.yearKey}`;
+        return new NextResponse(new Uint8Array(buffer), {
+          headers: {
+            'Content-Type':
+              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition': `attachment; filename="Warranty_BD_${basis}_${data.periodYm}_${yTag}${tag}.xlsx"`,
+          },
+        });
+      }
+      return NextResponse.json(data);
     }
 
     if (mode === 'breakdown-mismatch' || mode === 'breakdown-mismatch-export') {

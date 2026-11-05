@@ -1,6 +1,10 @@
 import ExcelJS from 'exceljs';
 import type { SnapResponse } from '@/modules/warranty-provision/server/snap';
-import type { BreakdownMismatchResponse } from '@/modules/warranty-provision/server/breakdown-mfg';
+import type { ActiveUnitsResponse } from '@/modules/warranty-provision/server/active-units';
+import type {
+  BreakdownMfgDetailResponse,
+  BreakdownMismatchResponse,
+} from '@/modules/warranty-provision/server/breakdown-mfg';
 import type { WarrantyForecastResponse } from '@/modules/warranty-provision/types';
 import { UNITS_TEMPLATE_HEADERS } from '@/modules/warranty-provision/server/units-import';
 
@@ -118,6 +122,114 @@ export async function buildSnapWorkbook(snap: SnapResponse): Promise<Buffer> {
   });
   ws.columns.forEach((c) => {
     c.width = 14;
+  });
+  const notes = wb.addWorksheet('Notes');
+  notes.addRow(['Item', 'Value']);
+  notes.getRow(1).font = { bold: true };
+  notes.addRow(['As of', snap.asOf]);
+  notes.addRow(['Units', snap.totalUnits]);
+  notes.addRow(['Exposure (unit-years)', snap.grandTotal]);
+  notes.addRow([
+    'Source',
+    'warranty_provision_rows · billing_date < as-of · coverage by FY',
+  ]);
+  notes.columns.forEach((c) => {
+    c.width = 28;
+  });
+  const buf = await wb.xlsx.writeBuffer();
+  return Buffer.from(buf);
+}
+
+export async function buildActiveUnitsWorkbook(
+  data: ActiveUnitsResponse
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Active units');
+  ws.addRow(['Year', 'Qty as per Mfg', 'Qty as per Billing']);
+  ws.getRow(1).font = { bold: true };
+  for (const r of data.rows) {
+    ws.addRow([r.year || 'Unknown', r.qtyMfg, r.qtyBilling]);
+  }
+  const tot = ws.addRow(['Total', data.totalMfg, data.totalBilling]);
+  tot.font = { bold: true };
+  ws.eachRow((row) => {
+    row.eachCell((cell, i) => {
+      if (i > 1) cell.numFmt = '#,##,##0';
+    });
+  });
+  ws.columns.forEach((c) => {
+    c.width = 18;
+  });
+  const notes = wb.addWorksheet('Notes');
+  notes.addRow(['Item', 'Value']);
+  notes.getRow(1).font = { bold: true };
+  notes.addRow(['As of', data.asOf]);
+  notes.addRow([
+    'Active',
+    'warranty_end_date > as-of AND billing_date < as-of',
+  ]);
+  notes.addRow([
+    'Mfg year',
+    'LEN(serial)=14 → 2000+MID(6,2) else billing year',
+  ]);
+  notes.columns.forEach((c) => {
+    c.width = 28;
+  });
+  const buf = await wb.xlsx.writeBuffer();
+  return Buffer.from(buf);
+}
+
+export async function buildBreakdownDetailWorkbook(
+  data: BreakdownMfgDetailResponse
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Calls');
+  ws.addRow(['Serial', 'YY', 'TRN', 'Party', 'Solved', 'Status', 'Major/Minor']);
+  ws.getRow(1).font = { bold: true };
+  for (const r of data.rows) {
+    ws.addRow([
+      r.serial,
+      r.yy,
+      r.trn,
+      r.partyName,
+      r.solvedDay ?? '',
+      r.statusBucket,
+      r.isMajor ? 'Major' : 'Minor',
+    ]);
+  }
+  ws.columns = [
+    { width: 16 },
+    { width: 6 },
+    { width: 12 },
+    { width: 28 },
+    { width: 12 },
+    { width: 12 },
+    { width: 12 },
+  ];
+  const notes = wb.addWorksheet('Summary');
+  notes.addRow(['Item', 'Value']);
+  notes.getRow(1).font = { bold: true };
+  notes.addRow(['Period', data.periodYm]);
+  notes.addRow(['As of', data.asOf]);
+  notes.addRow(['Basis', data.basis === 'crm-w' ? 'CRM WCO=W' : 'Active WP']);
+  notes.addRow(['Mfg year', data.yearKey === 'ALL' ? 'All years' : data.yearKey]);
+  notes.addRow([
+    'Filter',
+    data.majorFilter === 'major'
+      ? 'Major only'
+      : data.majorFilter === 'minor'
+        ? 'Minor only'
+        : 'All',
+  ]);
+  notes.addRow(['Rows', data.rows.length]);
+  notes.addRow([
+    'Source',
+    data.basis === 'crm-w'
+      ? 'calls_latest_hot · Breakdown solved · WCO=W · 14-digit'
+      : 'Active WP serials ⨝ calls_latest_hot · Breakdown solved · 14-digit',
+  ]);
+  notes.columns.forEach((c) => {
+    c.width = 18;
   });
   const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf);

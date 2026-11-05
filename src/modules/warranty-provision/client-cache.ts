@@ -83,7 +83,7 @@ export type SnapBundle = {
 };
 
 /** Bump when SNAP/active/breakdown payload semantics change (invalidates session cache). */
-export const SNAP_CACHE_VER = 'v3-bill-lt-asof';
+export const SNAP_CACHE_VER = 'v4-bd-major';
 
 const VER_SS_KEY = `${SS_PREFIX}ver`;
 

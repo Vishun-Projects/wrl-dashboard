@@ -58,6 +58,7 @@ const API = '/api/report/warranty-provision';
 const PAGE_SIZES = [100, 250, 500, 1000] as const;
 const CLAIMS_PAGE_SIZES = [50, 100, 200] as const;
 const MISMATCH_PAGE_SIZES = [50, 100, 200] as const;
+const BD_DETAIL_PAGE_SIZES = [50, 100, 200] as const;
 type Tab =
   | 'snap'
   | 'units'
@@ -174,6 +175,10 @@ function inrMoney(n: number): string {
 }
 
 /** Forecast KPIs: show 0 instead of hiding Base as '-'. */
+function fmtMajorPct(n: number | null | undefined): string {
+  return n == null || !Number.isFinite(n) ? '—' : `${n.toFixed(1)}%`;
+}
+
 function inrExact(n: number): string {
   if (!Number.isFinite(n)) return '—';
   return Math.round(n).toLocaleString('en-IN');
@@ -229,8 +234,14 @@ export default function WarrantyProvisionPageClient() {
   const [breakdownWco, setBreakdownWco] = useState<BreakdownMfgResponse | null>(null);
   const [bdDetailYear, setBdDetailYear] = useState<string | null>(null);
   const [bdDetailBasis, setBdDetailBasis] = useState<'wp-active' | 'crm-w'>('wp-active');
+  const [bdDetailMajor, setBdDetailMajor] = useState<'' | 'major' | 'minor'>('');
+  const [bdDetailPage, setBdDetailPage] = useState(1);
+  const [bdDetailPageSize, setBdDetailPageSize] =
+    useState<(typeof BD_DETAIL_PAGE_SIZES)[number]>(100);
   const [bdDetail, setBdDetail] = useState<BreakdownMfgDetailResponse | null>(null);
   const [bdDetailLoading, setBdDetailLoading] = useState(false);
+  const [snapExportMenuOpen, setSnapExportMenuOpen] = useState(false);
+  const snapExportMenuRef = useRef<HTMLDivElement | null>(null);
   const [rates, setRates] = useState<WarrantyRatesResponse | null>(null);
   const [forecast, setForecast] = useState<WarrantyForecastResponse | null>(null);
   const [scenario, setScenario] = useState<'base' | 'optimistic' | 'pessimistic'>('base');
@@ -276,7 +287,10 @@ export default function WarrantyProvisionPageClient() {
     ensureWarrantyCacheVersion();
     void (async () => {
       const cached = cacheGet<WarrantyProvisionOptions>('options');
-      if (cached) setOptions(cached);
+      if (cached) {
+        setOptions(cached);
+        return;
+      }
       try {
         const res = await fetch(`${API}?mode=options`, { credentials: 'include' });
         if (!res.ok) return;
@@ -293,14 +307,15 @@ export default function WarrantyProvisionPageClient() {
     const key = snapCacheKey(snapQs.toString(), asOf, periodYm);
     const cached = cacheGet<SnapBundle>(key);
     setLoadingLabel('Loading SNAP / breakdown…');
-    // Never paint stale bundle while a slow sibling request runs — always refetch.
-    setLoading(true);
     if (cached) {
       setSnap(cached.snap);
       setActiveUnits(cached.active);
       setBreakdownMfg(cached.breakdown);
       setBreakdownWco(cached.breakdownWco);
+      setLoading(false);
+      return;
     }
+    setLoading(true);
     try {
       const snapP = fetch(`${API}?mode=snap&${snapQs}`, { credentials: 'include' }).then(
         async (res) => {
@@ -360,40 +375,112 @@ export default function WarrantyProvisionPageClient() {
         breakdownWco: wcoData,
       });
     } catch (e) {
-      if (!cached) feedback.actionFailed(e instanceof Error ? e.message : 'SNAP failed');
+      feedback.actionFailed(e instanceof Error ? e.message : 'SNAP failed');
     } finally {
       setLoading(false);
     }
   }, [snapQs, asOf, periodYm]);
 
   const openBreakdownDetail = useCallback(
-    async (year: number, basis: 'wp-active' | 'crm-w') => {
-      const yearKey = String(year);
-      setBdDetailYear(yearKey);
+    (
+      year: number,
+      basis: 'wp-active' | 'crm-w',
+      majorFilter: '' | 'major' | 'minor' = ''
+    ) => {
+      setBdDetailYear(String(year));
       setBdDetailBasis(basis);
+      setBdDetailMajor(majorFilter);
+      setBdDetailPage(1);
       setBdDetail(null);
-      setBdDetailLoading(true);
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!bdDetailYear) return;
+    let cancelled = false;
+    setBdDetailLoading(true);
+    const mode =
+      bdDetailBasis === 'crm-w' ? 'breakdown-mfg-wco-detail' : 'breakdown-mfg-detail';
+    const params = new URLSearchParams({
+      mode,
+      periodYm,
+      year: bdDetailYear,
+      page: String(bdDetailPage),
+      pageSize: String(bdDetailPageSize),
+    });
+    if (bdDetailMajor) params.set('major', bdDetailMajor);
+    void (async () => {
       try {
-        const mode =
-          basis === 'crm-w' ? 'breakdown-mfg-wco-detail' : 'breakdown-mfg-detail';
-        const res = await fetch(
-          `${API}?mode=${mode}&periodYm=${encodeURIComponent(periodYm)}&year=${encodeURIComponent(yearKey)}`,
-          { credentials: 'include' }
-        );
+        const res = await fetch(`${API}?${params}`, { credentials: 'include' });
         if (!res.ok) {
           const errBody = (await res.json().catch(() => null)) as { error?: string } | null;
           throw new Error(errBody?.error || `Detail failed (${res.status})`);
         }
-        setBdDetail((await res.json()) as BreakdownMfgDetailResponse);
+        const data = (await res.json()) as BreakdownMfgDetailResponse;
+        if (!cancelled) setBdDetail(data);
       } catch (e) {
-        setBdDetailYear(null);
-        feedback.actionFailed(e instanceof Error ? e.message : 'Detail failed');
+        if (!cancelled) {
+          setBdDetailYear(null);
+          setBdDetailMajor('');
+          setBdDetail(null);
+          feedback.actionFailed(e instanceof Error ? e.message : 'Detail failed');
+        }
       } finally {
-        setBdDetailLoading(false);
+        if (!cancelled) setBdDetailLoading(false);
       }
-    },
-    [periodYm]
-  );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    bdDetailYear,
+    bdDetailBasis,
+    bdDetailMajor,
+    bdDetailPage,
+    bdDetailPageSize,
+    periodYm,
+  ]);
+
+  useEffect(() => {
+    if (!snapExportMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!snapExportMenuRef.current?.contains(e.target as Node)) {
+        setSnapExportMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSnapExportMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [snapExportMenuOpen]);
+
+  async function downloadBreakdownDetail() {
+    if (!bdDetailYear) return;
+    const mode =
+      bdDetailBasis === 'crm-w'
+        ? 'breakdown-mfg-wco-detail-export'
+        : 'breakdown-mfg-detail-export';
+    const params = new URLSearchParams({
+      mode,
+      periodYm,
+      year: bdDetailYear,
+    });
+    if (bdDetailMajor) params.set('major', bdDetailMajor);
+    const tag =
+      bdDetailMajor === 'major' ? '_Major' : bdDetailMajor === 'minor' ? '_Minor' : '';
+    const basis = bdDetailBasis === 'crm-w' ? 'CRM_WCO' : 'Active_WP';
+    await downloadExcel({
+      label: 'Breakdown calls Excel',
+      url: `${API}?${params}`,
+      filename: `Warranty_BD_${basis}_${periodYm}_Y${bdDetailYear}${tag}.xlsx`,
+    });
+  }
 
   const loadUnits = useCallback(async () => {
     const params = new URLSearchParams({
@@ -416,9 +503,9 @@ export default function WarrantyProvisionPageClient() {
     if (cached) {
       setRowsData(cached);
       setLoading(false);
-    } else {
-      setLoading(true);
+      return;
     }
+    setLoading(true);
     try {
       const res = await fetch(`${API}?${params}`, { credentials: 'include' });
       if (!res.ok) throw new Error('Units load failed');
@@ -426,7 +513,7 @@ export default function WarrantyProvisionPageClient() {
       setRowsData(data);
       cacheSet(key, data);
     } catch (e) {
-      if (!cached) feedback.actionFailed(e instanceof Error ? e.message : 'Load failed');
+      feedback.actionFailed(e instanceof Error ? e.message : 'Load failed');
     } finally {
       setLoading(false);
     }
@@ -451,7 +538,9 @@ export default function WarrantyProvisionPageClient() {
     if (cached) {
       setRates(cached);
       setLoading(false);
-    } else setLoading(true);
+      return;
+    }
+    setLoading(true);
     try {
       const res = await fetch(`${API}?mode=rates&${snapQs}`, { credentials: 'include' });
       if (!res.ok) throw new Error('Rates load failed');
@@ -459,7 +548,7 @@ export default function WarrantyProvisionPageClient() {
       setRates(data);
       cacheSet(key, data);
     } catch (e) {
-      if (!cached) feedback.actionFailed(e instanceof Error ? e.message : 'Rates failed');
+      feedback.actionFailed(e instanceof Error ? e.message : 'Rates failed');
     } finally {
       setLoading(false);
     }
@@ -475,7 +564,9 @@ export default function WarrantyProvisionPageClient() {
     if (cached) {
       setForecast(cached);
       setLoading(false);
-    } else setLoading(true);
+      return;
+    }
+    setLoading(true);
     try {
       const res = await fetch(`${API}?${p}`, { credentials: 'include' });
       if (!res.ok) throw new Error('Forecast load failed');
@@ -483,7 +574,7 @@ export default function WarrantyProvisionPageClient() {
       setForecast(data);
       cacheSet(key, data);
     } catch (e) {
-      if (!cached) feedback.actionFailed(e instanceof Error ? e.message : 'Forecast failed');
+      feedback.actionFailed(e instanceof Error ? e.message : 'Forecast failed');
     } finally {
       setLoading(false);
     }
@@ -501,9 +592,9 @@ export default function WarrantyProvisionPageClient() {
       setClaims(cached);
       if (cached.meta) setClaimsMeta(cached.meta);
       setLoading(false);
-    } else {
-      setLoading(true);
+      return;
     }
+    setLoading(true);
     try {
       const res = await fetch(
         `${API}?mode=claims&periodYm=${encodeURIComponent(periodYm)}&page=${claimsPage}&pageSize=${claimsPageSize}&q=${encodeURIComponent(claimsQ)}`,
@@ -515,7 +606,7 @@ export default function WarrantyProvisionPageClient() {
       if (data.meta) setClaimsMeta(data.meta);
       cacheSet(key, data);
     } catch (e) {
-      if (!cached) feedback.actionFailed(e instanceof Error ? e.message : 'Claims failed');
+      feedback.actionFailed(e instanceof Error ? e.message : 'Claims failed');
     } finally {
       setLoading(false);
     }
@@ -614,9 +705,9 @@ export default function WarrantyProvisionPageClient() {
     if (cached) {
       setMismatch(cached);
       setLoading(false);
-    } else {
-      setLoading(true);
+      return;
     }
+    setLoading(true);
     try {
       const params = new URLSearchParams({
         mode: 'breakdown-mismatch',
@@ -631,7 +722,7 @@ export default function WarrantyProvisionPageClient() {
       setMismatch(data);
       cacheSet(key, data);
     } catch (e) {
-      if (!cached) feedback.actionFailed(e instanceof Error ? e.message : 'Mismatch failed');
+      feedback.actionFailed(e instanceof Error ? e.message : 'Mismatch failed');
     } finally {
       setLoading(false);
     }
@@ -840,6 +931,8 @@ export default function WarrantyProvisionPageClient() {
   const claimsTotalPages = Math.max(1, Math.ceil(claimsTotal / claimsPageSize));
   const mismatchTotal = mismatch?.total ?? 0;
   const mismatchTotalPages = Math.max(1, Math.ceil(mismatchTotal / mismatchPageSize));
+  const bdDetailTotal = bdDetail?.total ?? 0;
+  const bdDetailTotalPages = Math.max(1, Math.ceil(bdDetailTotal / bdDetailPageSize));
 
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: 'snap', label: 'SNAP Report' },
@@ -879,11 +972,38 @@ export default function WarrantyProvisionPageClient() {
     }
   }
 
-  async function downloadSnap() {
+  type SnapExportKind = 'snap' | 'active' | 'bd-wp' | 'bd-crm';
+
+  async function downloadSnapReport(kind: SnapExportKind) {
+    setSnapExportMenuOpen(false);
+    if (kind === 'snap') {
+      await downloadExcel({
+        label: 'SNAP coverage',
+        url: `${API}?mode=snap-export&${snapQs}`,
+        filename: `Warranty_SNAP_${asOf}.xlsx`,
+      });
+      return;
+    }
+    if (kind === 'active') {
+      await downloadExcel({
+        label: 'Active units',
+        url: `${API}?mode=active-units-export&asOf=${encodeURIComponent(asOf)}`,
+        filename: `Warranty_ActiveUnits_${asOf}.xlsx`,
+      });
+      return;
+    }
+    const crm = kind === 'bd-crm';
+    const mode = crm ? 'breakdown-mfg-wco-detail-export' : 'breakdown-mfg-detail-export';
+    const basis = crm ? 'CRM_WCO' : 'Active_WP';
+    const params = new URLSearchParams({
+      mode,
+      periodYm,
+      year: 'ALL',
+    });
     await downloadExcel({
-      label: 'SNAP Excel',
-      url: `${API}?mode=snap-export&${snapQs}`,
-      filename: `Warranty_SNAP_${asOf}.xlsx`,
+      label: crm ? 'Breakdown CRM WCO=W calls' : 'Breakdown Active WP calls',
+      url: `${API}?${params}`,
+      filename: `Warranty_BD_${basis}_${periodYm}_AllYears.xlsx`,
     });
   }
 
@@ -1076,15 +1196,65 @@ export default function WarrantyProvisionPageClient() {
                   className="ml-1 h-8 w-16 rounded border border-slate-200 px-2 text-[12px]"
                 />
               </label>
-              <button
-                type="button"
-                onClick={() => void downloadSnap()}
-                disabled={exporting}
-                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] disabled:opacity-50"
-              >
-                <Download className={`h-3.5 w-3.5 ${exporting ? 'animate-pulse' : ''}`} />
-                {exporting ? 'Preparing…' : 'Download Excel'}
-              </button>
+              <div className="relative" ref={snapExportMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setSnapExportMenuOpen((o) => !o)}
+                  disabled={exporting}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] disabled:opacity-50"
+                  aria-haspopup="menu"
+                  aria-expanded={snapExportMenuOpen}
+                >
+                  <Download className={`h-3.5 w-3.5 ${exporting ? 'animate-pulse' : ''}`} />
+                  {exporting ? 'Preparing…' : 'Download Excel'}
+                </button>
+                {snapExportMenuOpen ? (
+                  <div
+                    role="menu"
+                    className="absolute left-0 top-full z-30 mt-1 w-72 rounded-md border border-slate-200 bg-white py-1 shadow-lg"
+                  >
+                    {(
+                      [
+                        {
+                          kind: 'snap' as const,
+                          title: 'SNAP coverage',
+                          hint: 'Matrix on screen (billing year × FY)',
+                        },
+                        {
+                          kind: 'active' as const,
+                          title: 'Active units by year',
+                          hint: 'Mfg / billing year totals on screen',
+                        },
+                        {
+                          kind: 'bd-wp' as const,
+                          title: 'Breakdown · Active WP — call dump',
+                          hint: 'All solved Breakdown calls that feed the year table',
+                        },
+                        {
+                          kind: 'bd-crm' as const,
+                          title: 'Breakdown · CRM WCO=W — call dump',
+                          hint: 'All WCO=W solved Breakdown calls for the period',
+                        },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.kind}
+                        type="button"
+                        role="menuitem"
+                        className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-slate-50"
+                        onClick={() => void downloadSnapReport(opt.kind)}
+                      >
+                        <span className="text-[12px] font-medium text-slate-800">
+                          {opt.title}
+                        </span>
+                        <span className="text-[10px] leading-snug text-slate-500">
+                          {opt.hint}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               <span className="ml-auto text-[12px] text-slate-500">
                 {loading
                   ? 'Loading…'
@@ -1256,7 +1426,7 @@ export default function WarrantyProvisionPageClient() {
                       Breakdown solved · machines by mfg year
                     </div>
                     <div className="mt-0.5 text-[11px] leading-snug text-slate-500">
-                      14-digit · Active WP · click year for calls
+                      14-digit · Active WP · click year / Major / Minor for calls
                     </div>
                   </div>
                   {copyTableBtn(breakdownGridRef)}
@@ -1267,6 +1437,9 @@ export default function WarrantyProvisionPageClient() {
                       <tr>
                         <AdminTh>Mfg year</AdminTh>
                         <AdminTh align="right">Machines</AdminTh>
+                        <AdminTh align="right">Major</AdminTh>
+                        <AdminTh align="right">Minor</AdminTh>
+                        <AdminTh align="right">Major %</AdminTh>
                       </tr>
                     </AdminThead>
                     <tbody>
@@ -1288,6 +1461,32 @@ export default function WarrantyProvisionPageClient() {
                           >
                             {inrExact(r.machines)}
                           </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`text-sky-800 underline-offset-2 hover:underline ${cellSelected('breakdown', ri, 2) ? CELL_SEL_CLS : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void openBreakdownDetail(r.year, 'wp-active', 'major');
+                            }}
+                          >
+                            {inrExact(r.majorCalls)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`text-sky-800 underline-offset-2 hover:underline ${cellSelected('breakdown', ri, 3) ? CELL_SEL_CLS : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void openBreakdownDetail(r.year, 'wp-active', 'minor');
+                            }}
+                          >
+                            {inrExact(r.minorCalls)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={cellSelected('breakdown', ri, 4) ? CELL_SEL_CLS : ''}
+                          >
+                            {fmtMajorPct(r.majorPct)}
+                          </AdminTd>
                         </AdminTr>
                       ))}
                       {breakdownMfg ? (
@@ -1302,6 +1501,24 @@ export default function WarrantyProvisionPageClient() {
                             className={`font-bold ${cellSelected('breakdown', breakdownMfg.rows.length, 1) ? CELL_SEL_CLS : ''}`}
                           >
                             {inrExact(breakdownMfg.totalMachines)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`font-bold ${cellSelected('breakdown', breakdownMfg.rows.length, 2) ? CELL_SEL_CLS : ''}`}
+                          >
+                            {inrExact(breakdownMfg.totalMajorCalls)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`font-bold ${cellSelected('breakdown', breakdownMfg.rows.length, 3) ? CELL_SEL_CLS : ''}`}
+                          >
+                            {inrExact(breakdownMfg.totalMinorCalls)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`font-bold ${cellSelected('breakdown', breakdownMfg.rows.length, 4) ? CELL_SEL_CLS : ''}`}
+                          >
+                            {fmtMajorPct(breakdownMfg.totalMajorPct)}
                           </AdminTd>
                         </AdminTr>
                       ) : null}
@@ -1321,7 +1538,7 @@ export default function WarrantyProvisionPageClient() {
                       Breakdown solved · CRM WCO=W · by mfg year
                     </div>
                     <div className="mt-0.5 text-[11px] leading-snug text-slate-500">
-                      hot · WCO=W · 14-digit · click year for calls
+                      hot · WCO=W · 14-digit · click year / Major / Minor for calls
                     </div>
                   </div>
                   {copyTableBtn(breakdownWcoGridRef)}
@@ -1332,6 +1549,9 @@ export default function WarrantyProvisionPageClient() {
                       <tr>
                         <AdminTh>Mfg year</AdminTh>
                         <AdminTh align="right">Machines</AdminTh>
+                        <AdminTh align="right">Major</AdminTh>
+                        <AdminTh align="right">Minor</AdminTh>
+                        <AdminTh align="right">Major %</AdminTh>
                       </tr>
                     </AdminThead>
                     <tbody>
@@ -1353,6 +1573,32 @@ export default function WarrantyProvisionPageClient() {
                           >
                             {inrExact(r.machines)}
                           </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`text-sky-800 underline-offset-2 hover:underline ${cellSelected('breakdown-wco', ri, 2) ? CELL_SEL_CLS : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void openBreakdownDetail(r.year, 'crm-w', 'major');
+                            }}
+                          >
+                            {inrExact(r.majorCalls)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`text-sky-800 underline-offset-2 hover:underline ${cellSelected('breakdown-wco', ri, 3) ? CELL_SEL_CLS : ''}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void openBreakdownDetail(r.year, 'crm-w', 'minor');
+                            }}
+                          >
+                            {inrExact(r.minorCalls)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={cellSelected('breakdown-wco', ri, 4) ? CELL_SEL_CLS : ''}
+                          >
+                            {fmtMajorPct(r.majorPct)}
+                          </AdminTd>
                         </AdminTr>
                       ))}
                       {breakdownWco ? (
@@ -1368,6 +1614,24 @@ export default function WarrantyProvisionPageClient() {
                           >
                             {inrExact(breakdownWco.totalMachines)}
                           </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`font-bold ${cellSelected('breakdown-wco', breakdownWco.rows.length, 2) ? CELL_SEL_CLS : ''}`}
+                          >
+                            {inrExact(breakdownWco.totalMajorCalls)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`font-bold ${cellSelected('breakdown-wco', breakdownWco.rows.length, 3) ? CELL_SEL_CLS : ''}`}
+                          >
+                            {inrExact(breakdownWco.totalMinorCalls)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`font-bold ${cellSelected('breakdown-wco', breakdownWco.rows.length, 4) ? CELL_SEL_CLS : ''}`}
+                          >
+                            {fmtMajorPct(breakdownWco.totalMajorPct)}
+                          </AdminTd>
                         </AdminTr>
                       ) : null}
                     </tbody>
@@ -1382,6 +1646,7 @@ export default function WarrantyProvisionPageClient() {
                   <ModalBackdrop
                     onClick={() => {
                       setBdDetailYear(null);
+                      setBdDetailMajor('');
                       setBdDetail(null);
                     }}
                   />
@@ -1391,6 +1656,11 @@ export default function WarrantyProvisionPageClient() {
                         <h2 className="text-sm font-semibold text-slate-900">
                           Breakdown solved · mfg year {bdDetailYear}
                           {bdDetailBasis === 'crm-w' ? ' · CRM WCO=W' : ' · Active WP'}
+                          {bdDetailMajor === 'major'
+                            ? ' · Major only'
+                            : bdDetailMajor === 'minor'
+                              ? ' · Minor only'
+                              : ''}
                         </h2>
                         <p className="mt-1 text-[11px] text-slate-500">
                           14-digit serials · year = 2000 + digits at positions 6–7
@@ -1399,17 +1669,31 @@ export default function WarrantyProvisionPageClient() {
                             : ' · matched Active warranty provision'}
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        className="rounded p-1 text-slate-500 hover:bg-slate-100"
-                        onClick={() => {
-                          setBdDetailYear(null);
-                          setBdDetail(null);
-                        }}
-                        aria-label="Close"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => void downloadBreakdownDetail()}
+                          disabled={bdDetailLoading || exporting || bdDetailTotal <= 0}
+                          className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] disabled:opacity-50"
+                        >
+                          <Download
+                            className={`h-3.5 w-3.5 ${exporting ? 'animate-pulse' : ''}`}
+                          />
+                          {exporting ? 'Preparing…' : 'Download Excel'}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded p-1 text-slate-500 hover:bg-slate-100"
+                          onClick={() => {
+                            setBdDetailYear(null);
+                            setBdDetailMajor('');
+                            setBdDetail(null);
+                          }}
+                          aria-label="Close"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                     <div className="min-h-0 flex-1 overflow-auto custom-scrollbar px-2 py-2">
                       {bdDetailLoading ? (
@@ -1426,6 +1710,7 @@ export default function WarrantyProvisionPageClient() {
                               <AdminTh>Party</AdminTh>
                               <AdminTh>Solved</AdminTh>
                               <AdminTh>Status</AdminTh>
+                              <AdminTh>Major/Minor</AdminTh>
                             </tr>
                           </AdminThead>
                           <tbody>
@@ -1439,18 +1724,62 @@ export default function WarrantyProvisionPageClient() {
                                   {r.solvedDay ? formatUiDate(r.solvedDay) : '—'}
                                 </AdminTd>
                                 <AdminTd>{r.statusBucket || '—'}</AdminTd>
+                                <AdminTd>{r.isMajor ? 'Major' : 'Minor'}</AdminTd>
                               </AdminTr>
                             ))}
                           </tbody>
                         </AdminTable>
                       )}
                     </div>
-                    <div className="shrink-0 border-t border-slate-200 px-4 py-2 text-[11px] text-slate-500">
-                      {bdDetailLoading
-                        ? ''
-                        : bdDetail
-                          ? `${bdDetail.total} call(s)${bdDetail.truncated ? ' (showing first 2000)' : ''}`
-                          : ''}
+                    <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-slate-200 px-4 py-2 text-[11px] text-slate-500">
+                      {bdDetailLoading ? null : bdDetail ? (
+                        <>
+                          <span>
+                            {bdDetailTotal.toLocaleString('en-IN')} call(s)
+                          </span>
+                          <label className="text-[11px] text-slate-500">
+                            Rows
+                            <select
+                              value={bdDetailPageSize}
+                              onChange={(e) => {
+                                setBdDetailPage(1);
+                                setBdDetailPageSize(
+                                  Number(e.target.value) as (typeof BD_DETAIL_PAGE_SIZES)[number]
+                                );
+                              }}
+                              className="ml-1 h-7 rounded border border-slate-200 px-1.5 text-[11px]"
+                              disabled={bdDetailLoading}
+                            >
+                              {BD_DETAIL_PAGE_SIZES.map((n) => (
+                                <option key={n} value={n}>
+                                  {n}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <span>
+                            Page {bdDetailPage} / {bdDetailTotalPages}
+                          </span>
+                          <button
+                            type="button"
+                            className="inline-flex h-7 items-center rounded-md border border-slate-200 bg-white px-1.5 disabled:opacity-40"
+                            disabled={bdDetailPage <= 1 || bdDetailLoading}
+                            onClick={() => setBdDetailPage((p) => Math.max(1, p - 1))}
+                            aria-label="Previous page"
+                          >
+                            <ChevronLeft className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            className="inline-flex h-7 items-center rounded-md border border-slate-200 bg-white px-1.5 disabled:opacity-40"
+                            disabled={bdDetailPage >= bdDetailTotalPages || bdDetailLoading}
+                            onClick={() => setBdDetailPage((p) => p + 1)}
+                            aria-label="Next page"
+                          >
+                            <ChevronRight className="h-3.5 w-3.5" />
+                          </button>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                 </div>
