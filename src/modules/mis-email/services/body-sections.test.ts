@@ -456,7 +456,7 @@ describe('buildEmailBodySectionsHtml', () => {
     for (const branch of hidden) expect(html).not.toContain(branch);
   });
 
-  it('keeps explicit Regional rows (does not replace with Branch rollup)', () => {
+  it('Regional body follows Branch rollup when Branch rows exist', () => {
     const ranchi = {
       branch: '1150 - RANCHI BRANCH',
       region: 'EAST ZONE',
@@ -471,7 +471,7 @@ describe('buildEmailBodySectionsHtml', () => {
       part_pending: 0,
       active_eng: 8,
     };
-    const regionalEast = {
+    const staleRegional = {
       region: 'EAST ZONE',
       total_calls: 57603,
       solved_calls: 50842,
@@ -486,13 +486,12 @@ describe('buildEmailBodySectionsHtml', () => {
     };
     const text = buildEmailBodySectionsPlainText(['regional_performance', 'branch_performance'], {
       summary: sampleData,
-      regionalPerformanceRows: [regionalEast],
+      regionalPerformanceRows: [staleRegional],
       branchPerformanceRows: [ranchi],
     });
-    expect(text).toContain('open 392');
-    expect(text).toContain('solved 50,842');
-    expect(text).toContain('total 57,603');
+    expect(text).toContain('open 36');
     expect(text).toContain('RANCHI');
+    expect(text).not.toContain('open 392');
     expect(text).not.toMatch(/open -\d/);
   });
 

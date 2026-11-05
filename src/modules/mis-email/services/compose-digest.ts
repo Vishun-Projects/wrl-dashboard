@@ -2,22 +2,20 @@ import { buildDigestAttachments, resolveDigestAttachmentFilenames, type EmailAtt
 import {
   buildEmailBodySectionsHtml,
   buildEmailBodySectionsPlainText,
-  buildTopLevelBranchRows,
   countKeyAccountBodyRows,
   resolveDigestBodySections,
+  rollupVisibleBranchesToRegional,
   type MisEmailBodyContext,
 } from '@/modules/mis-email/services/body-sections';
 import {
   resolveDigestKeyAccountBodyRows,
 } from '@/modules/mis-email/services/fetch-digest-accounts';
 import {
-  buildMisEmailRegionalPerformanceRows,
+  buildMisEmailWrlBranchBase,
   overlayBranchOpenFromExcelRows,
-  overlayRegionalOpenFromExcelRows,
   reconcileMisEmailOpenCounts,
 } from '@/modules/mis-email/services/mail-basis';
-import { mergeBranchSummaryRowsByName, type BdMisTraceRow } from '@/modules/mis';
-import type { BranchPerformanceRow } from '@/modules/mis-email/services/mail-types';
+import type { BdMisTraceRow } from '@/modules/mis';
 import {
   fetchDigestRegisterRows,
   type DigestDateRange,
@@ -158,48 +156,22 @@ async function buildMisEmailBodyContext(
     context.clientAccountSummary = clientRows as Array<Record<string, unknown>>;
   }
 
-  // Preview ≡ send. Two grains, one open corpus:
-  // Regional solved/cancelled = account merge (CRM − Cadbury + Mondelez/Coke import);
-  // Branch solved/cancelled = CRM top-level branches; opens/aging = Excel overlay.
+  // Preview ≡ send. One grain: WRL Branch (CRM offices rolled up + import solved
+  // + Excel opens) → Regional is that rollup. Open Excel uses the same open set.
   if (needsRegionalBody || needsBranchBody) {
     if (openTraceRows === undefined) {
       throw new Error(
         'MIS regional/branch body requires open-calls corpus — refusing CRM-open fallback'
       );
     }
+    const branch = overlayBranchOpenFromExcelRows(
+      buildMisEmailWrlBranchBase(data.branchSummary, openTraceRows),
+      openTraceRows,
+      data.branchSummary
+    );
+    if (needsBranchBody) context.branchPerformanceRows = branch;
     if (needsRegionalBody) {
-      const clientRows =
-        clientAccountSummary !== undefined
-          ? clientAccountSummary
-          : await fetchDigestClientAccountSummaryCached(dateRange);
-      context.clientAccountSummary = clientRows as Array<Record<string, unknown>>;
-      context.regionalPerformanceRows = overlayRegionalOpenFromExcelRows(
-        buildMisEmailRegionalPerformanceRows(data, clientRows),
-        openTraceRows
-      );
-    }
-    if (needsBranchBody) {
-      const crmBranch: BranchPerformanceRow[] = mergeBranchSummaryRowsByName(
-        buildTopLevelBranchRows(data.branchSummary)
-      ).map((row) => ({
-        branch: row.branch,
-        region: row.region,
-        total_calls: row.total_calls,
-        solved_calls: row.solved_calls,
-        cancelled_calls: row.cancelled_calls,
-        open_calls: row.open_calls,
-        age_2: row.age_2,
-        age_3: row.age_3,
-        age_7: row.age_7,
-        age_15: row.age_15,
-        part_pending: row.part_pending,
-        active_eng: row.active_eng,
-      }));
-      context.branchPerformanceRows = overlayBranchOpenFromExcelRows(
-        crmBranch,
-        openTraceRows,
-        data.branchSummary
-      );
+      context.regionalPerformanceRows = rollupVisibleBranchesToRegional(branch);
     }
   }
 
@@ -497,6 +469,24 @@ export async function buildMisEmailPayload(
       }
     ), (ctx) => `accountRows=${ctx.accountRows?.length ?? 0}`
   );
+
+  // Runtime lock: Regional All open ≡ Branch open (same WRL-mapped Excel set).
+  if (
+    bodyContext.branchPerformanceRows !== undefined &&
+    bodyContext.regionalPerformanceRows !== undefined
+  ) {
+    const fromBranches = rollupVisibleBranchesToRegional(bodyContext.branchPerformanceRows);
+    const regionalOpen = bodyContext.regionalPerformanceRows.reduce(
+      (s, r) => s + Number(r.open_calls || 0),
+      0
+    );
+    const rollupOpen = fromBranches.reduce((s, r) => s + Number(r.open_calls || 0), 0);
+    if (regionalOpen !== rollupOpen) {
+      throw new Error(
+        `MIS body Regional open (${regionalOpen}) !== Branch rollup open (${rollupOpen}) — refuse send/preview`
+      );
+    }
+  }
 
   const bodyLayout = resolveMisEmailBodyLayoutFromPrefs(prefs);
   const org = await getMisEmailOrgSettings({ fresh: true });

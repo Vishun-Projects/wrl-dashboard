@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 /**
- * Hard lock: MIS mail body formula (Nov 2026 corrected).
+ * Hard lock: MIS mail body — Regional ≡ Branch rollup; opens ≡ Excel.
  *
- * Regional: account-merge solved/cancelled + open Excel overlay (zone).
- * Branch: CRM top-level solved/cancelled + open Excel overlay (WRL plant map).
- * Never full-trace body, never CRM-open fallback, never Unassigned bucket.
+ * Branch = CRM offices rolled to WRL + import solved/cancelled + Excel open overlay.
+ * Regional = that Branch rollup. Open Excel = same WRL-mapped opens.
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -50,8 +49,13 @@ mustNotInclude(
 );
 mustNotInclude(
   compose,
-  'buildMisEmailKeyAccountRowsFromTrace',
-  'compose must not use FromTrace for key-account body'
+  'overlayRegionalOpenFromExcelRows',
+  'Regional must be Branch rollup — not a second zone overlay path'
+);
+mustNotInclude(
+  compose,
+  'buildMisEmailRegionalPerformanceRows',
+  'Regional must not use separate account-merge path (breaks Branch parity)'
 );
 mustNotInclude(compose, 'Unassigned', 'do not invent an Unassigned branch bucket for opens');
 mustNotInclude(
@@ -66,18 +70,18 @@ mustInclude(
 );
 mustInclude(
   compose,
-  'buildMisEmailRegionalPerformanceRows',
-  'Regional solved/cancelled must come from account merge (not Branch rollup)'
+  'buildMisEmailWrlBranchBase',
+  'Branch base must roll CRM offices to WRL + import solved'
 );
 mustInclude(
   compose,
-  'overlayRegionalOpenFromExcelRows',
-  'Regional opens must come from Excel overlay'
+  'rollupVisibleBranchesToRegional',
+  'Regional must be Branch rollup'
 );
 mustInclude(
   compose,
-  'overlayBranchOpenFromExcelRows',
-  'Branch opens must come from Excel overlay'
+  'Regional open (',
+  'compose must assert Regional open ≡ Branch rollup open'
 );
 mustInclude(
   compose,
@@ -85,39 +89,29 @@ mustInclude(
   'preview and send must pass the same open overlay'
 );
 
-mustNotInclude(
-  mailBasis,
-  'MIS_UNASSIGNED_BRANCH_LABEL',
-  'mail-basis must not reintroduce Unassigned open bucket'
-);
-mustNotInclude(mailBasis, '— Unassigned', 'mail-basis must not label unmapped plants Unassigned');
-mustInclude(
-  mailBasis,
-  'if (!resolved) continue',
-  'unmapped plants must be omitted from branch overlay'
-);
+mustNotInclude(mailBasis, 'MIS_UNASSIGNED_BRANCH_LABEL', 'no Unassigned open bucket');
+mustNotInclude(mailBasis, '— Unassigned', 'no Unassigned open bucket');
+mustInclude(mailBasis, 'buildMisEmailWrlBranchBase', 'WRL branch base builder required');
+mustInclude(mailBasis, 'isMailBodyHiddenBranch(resolved.branch)', 'hidden WRL opens omitted from overlay');
 
 mustInclude(
-  excel,
-  'filterTraceRowsForUnifiedOpenExport',
-  'Open Calls Excel must use Cadbury-safe unified opens (same as Regional overlay)'
-);
-mustNotInclude(
   excel,
   'filterTraceRowsForMailBodyOpenExport',
-  'Open Calls Excel must not use WRL-drop filter (that undercounted vs Regional)'
+  'Open Calls Excel must use same WRL-mapped opens as body'
+);
+mustNotInclude(
+  excel,
+  'filterTraceRowsForUnifiedOpenExport(payload.traceRows)',
+  'Open Calls Excel must not use unmapped unified opens'
 );
 
-mustInclude(
-  plant,
-  'findSapCodeTopLevelBranch',
-  '1127/1150-style labels must prefer WRL BRANCH over franchisee officeId'
-);
+mustInclude(plant, 'rollupCrmOfficesToWrlBranches', 'franchisee offices must roll into WRL parents');
+mustInclude(plant, 'findSapCodeTopLevelBranch', 'SAP 1127/1150 → Guwahati/Ranchi');
 
 mustInclude(
   body,
-  'regionalPerformanceRows !== undefined',
-  'body must prefer explicit Regional rows over Branch rollup'
+  'branchPerformanceRows !== undefined',
+  'body Regional prefers Branch rollup when Branch rows exist'
 );
 
 console.log('check:mis-mail-formula OK');

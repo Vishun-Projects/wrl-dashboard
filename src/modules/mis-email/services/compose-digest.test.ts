@@ -489,7 +489,7 @@ describe('buildMisEmailPayload early exits', () => {
     expect(result.preview.plainText).toContain('Regional Performance');
   });
 
-  it('keeps Regional account-merge solved + open overlay when traceable Excel is on', async () => {
+  it('keeps Regional ≡ Branch rollup when traceable Excel is on', async () => {
     const ranchi = '1150 - RANCHI BRANCH';
     fetchDigestSummaryDataCached.mockResolvedValue({
       branchSummary: [
@@ -571,8 +571,7 @@ describe('buildMisEmailPayload early exits', () => {
       }
     );
 
-    // Branch: CRM solved 40 + open overlay 2.
-    // Regional with empty accounts falls back to CRM branch grain + open overlay.
+    // Branch and Regional share one WRL grain (rollup parity).
     expect(result.preview.plainText).toMatch(/RANCHI BRANCH: total 52, solved 40, cancelled 10, open 2/);
     expect(result.preview.plainText).toMatch(/EAST: total 52, solved 40, cancelled 10, open 2/);
   });

@@ -3,18 +3,19 @@ import { MIS_EMAIL_THEME } from '@/modules/mis-email/services/email-template';
 import type { MisEmailBodyPermissions, MisEmailKeyAccountsByZone } from '@/modules/mis-email/services/preferences';
 import {
   buildMergedAccountMetricRow,
+  clientAccountDisplayName,
   DEFAULT_CLIENT_MERGE_WITH_CRM,
+  isMailBodyHiddenBranch,
+  mergeBranchSummaryRowsByName,
   sortAccountRowsByZoneThenAccount,
   type MergeSelection,
 } from '@/modules/mis';
-import { clientAccountDisplayName } from '@/modules/mis';
 import {
   composeEmailBodyGridHtml,
   resolveMisEmailBodyLayout,
   type MisEmailBodyLayout,
 } from '@/modules/mis-email/services/email-body-layout';
 import type { BranchPerformanceRow, RegionalPerformanceRow } from '@/modules/mis-email/services/mail-types';
-import { mergeBranchSummaryRowsByName } from '@/modules/mis';
 
 export const MIS_EMAIL_BODY_SECTION_IDS = [
   'regional_performance',
@@ -439,17 +440,6 @@ function buildRegionalPerformanceHtml(
   );
 }
 
-/** Shown in Excel; omitted from digest preview and mail body only. */
-const MAIL_BODY_HIDDEN_BRANCHES = new Set([
-  '1155 - CHANDIGARH BRANCH',
-  'AGRA BRANCH - 1160',
-  'WRL GUJRAT BRANCH OFFICE',
-]);
-
-function isMailBodyHiddenBranch(name: string): boolean {
-  return MAIL_BODY_HIDDEN_BRANCHES.has(name.trim().toUpperCase().replace(/\s+/g, ' '));
-}
-
 function isNonZeroBranchPerformanceRow(row: {
   total_calls: number;
   solved_calls: number;
@@ -566,13 +556,12 @@ function regionalRowsForBody(
   data: SummaryDashboard,
   bodyContext: MisEmailBodyContext
 ): RegionalPerformanceRow[] {
-  // Prefer explicit Regional (account-merge solved + open overlay). Do not replace
-  // with Branch rollup — that undercounted zone Total/Solved (SOUTH/EAST).
-  if (bodyContext.regionalPerformanceRows !== undefined) {
-    return resolveRegionalPerformanceRows(data, bodyContext);
-  }
+  // Regional ≡ Branch rollup whenever Branch rows exist (All must match Branch sum).
   if (bodyContext.branchPerformanceRows !== undefined) {
     return rollupVisibleBranchesToRegional(bodyContext.branchPerformanceRows);
+  }
+  if (bodyContext.regionalPerformanceRows !== undefined) {
+    return resolveRegionalPerformanceRows(data, bodyContext);
   }
   return resolveRegionalPerformanceRows(data, bodyContext);
 }

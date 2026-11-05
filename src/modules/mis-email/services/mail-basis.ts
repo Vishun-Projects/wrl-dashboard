@@ -4,9 +4,12 @@ import {
   bdMisSourcesFromSelection,
   buildBdMisRegionalRows,
   countTraceOpenCalls,
+  filterTraceRowsForMailBodyOpenExport,
   filterTraceRowsForSummaryExport,
   filterTraceRowsForUnifiedOpenExport,
+  isMailBodyHiddenBranch,
   resolveTracePlantToWrlBranch,
+  rollupCrmOfficesToWrlBranches,
   sumBdMisRegionalGrand,
   type BdMisGrandRow,
   type BdMisRegionalRow,
@@ -118,6 +121,74 @@ export function overlayRegionalOpenFromExcelRows(
   });
 }
 
+/**
+ * Add Mondelez/Coke (non-CRM) solved/cancelled from the open corpus onto WRL branches
+ * so Branch totals can match Regional after open overlay.
+ */
+export function addImportSolvedCancelledToWrlBranches(
+  branches: BranchPerformanceRow[],
+  traceRows: BdMisTraceRow[],
+  branchSummary?: BranchSummaryRow[]
+): BranchPerformanceRow[] {
+  const byKey = new Map(
+    branches.map((row) => [
+      `${String(row.region ?? '').toUpperCase()}::${row.branch}`,
+      { ...row },
+    ])
+  );
+  for (const row of traceRows) {
+    // Only client-import rows (Mondelez/Coke/…). Untagged fixtures stay on CRM base.
+    if (!row.source || row.source === 'CRM') continue;
+    if (row.counts_toward !== 'solved' && row.counts_toward !== 'cancelled') continue;
+    if (row.included_in_final_count === false) continue;
+    const region = String(row.region ?? 'OTHER').toUpperCase();
+    const resolved = resolveTracePlantToWrlBranch(row.plant ?? '', region, branchSummary);
+    if (!resolved || isMailBodyHiddenBranch(resolved.branch)) continue;
+    const branchRegion = String(resolved.region).toUpperCase();
+    const key = `${branchRegion}::${resolved.branch}`;
+    let agg = byKey.get(key);
+    if (!agg) {
+      agg = {
+        branch: resolved.branch,
+        region: branchRegion,
+        total_calls: 0,
+        solved_calls: 0,
+        cancelled_calls: 0,
+        open_calls: 0,
+        age_2: 0,
+        age_3: 0,
+        age_7: 0,
+        age_15: 0,
+        part_pending: 0,
+        active_eng: 0,
+      };
+      byKey.set(key, agg);
+    }
+    if (row.counts_toward === 'solved') agg.solved_calls += 1;
+    else agg.cancelled_calls += 1;
+    agg.total_calls = agg.solved_calls + agg.cancelled_calls + agg.open_calls;
+  }
+  return [...byKey.values()];
+}
+
+/** CRM offices → WRL parents, then import solved/cancelled, ready for open overlay. */
+export function buildMisEmailWrlBranchBase(
+  branchSummary: BranchSummaryRow[],
+  traceRows: BdMisTraceRow[] = []
+): BranchPerformanceRow[] {
+  const rolled = rollupCrmOfficesToWrlBranches(branchSummary).map((row) => ({
+    ...row,
+    // Opens replaced by Excel overlay next — keep aging zeroed here.
+    open_calls: 0,
+    age_2: 0,
+    age_3: 0,
+    age_7: 0,
+    age_15: 0,
+    total_calls: row.solved_calls + row.cancelled_calls,
+  }));
+  return addImportSolvedCancelledToWrlBranches(rolled, traceRows, branchSummary);
+}
+
 export function overlayBranchOpenFromExcelRows(
   summaryBranch: BranchPerformanceRow[],
   traceRows: BdMisTraceRow[],
@@ -129,9 +200,8 @@ export function overlayBranchOpenFromExcelRows(
     if (row.counts_toward !== 'open') continue;
     const region = String(row.region ?? 'OTHER').toUpperCase();
     const resolved = resolveTracePlantToWrlBranch(row.plant ?? '', region, branchSummary);
-    // Same as the 2559 mail: plants that do not map onto a WRL branch are omitted
-    // (do not invent an "Unassigned" bucket — that inflated All open).
-    if (!resolved) continue;
+    // Drop unmapped + mail-hidden WRL labels so Branch / Regional / Excel share one open set.
+    if (!resolved || isMailBodyHiddenBranch(resolved.branch)) continue;
     const branchRegion = String(resolved.region).toUpperCase();
     const key = `${branchRegion}::${resolved.branch}`;
     let agg = byKey.get(key);
@@ -300,8 +370,8 @@ export function countMisEmailOpenParity(
   const regional = buildMisEmailRegionalPerformanceRowsFromTrace(traceRows, branchSummary);
   const branch = buildMisEmailBranchPerformanceRowsFromTrace(traceRows, branchSummary);
   const detail = filterTraceRowsForSummaryExport(traceRows);
-  // Same open basis as WRL_BD_MIS_Open_Calls / Regional overlay (unified Cadbury-safe).
-  const excelOpenRows = filterTraceRowsForUnifiedOpenExport(traceRows).filter(
+  // Same open basis as WRL_BD_MIS_Open_Calls / Branch overlay (WRL-mapped).
+  const excelOpenRows = filterTraceRowsForMailBodyOpenExport(traceRows, branchSummary).filter(
     (row) => row.counts_toward === 'open'
   ).length;
   const regionalBodyOpen = regional.reduce((sum, row) => sum + row.open_calls, 0);

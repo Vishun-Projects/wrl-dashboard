@@ -9,6 +9,17 @@
 import type { BranchSummaryRow } from '@/lib/summary/derive';
 import { CLIENT_IMPORT_BRANCH_BY_OFFICE_ID } from '@/modules/mis/client-import/services/client-branch-map';
 
+/** Shown in Excel; omitted from MIS digest Regional/Branch body. */
+export const MAIL_BODY_HIDDEN_BRANCHES = new Set([
+  '1155 - CHANDIGARH BRANCH',
+  'AGRA BRANCH - 1160',
+  'WRL GUJRAT BRANCH OFFICE',
+]);
+
+export function isMailBodyHiddenBranch(name: string): boolean {
+  return MAIL_BODY_HIDDEN_BRANCHES.has(name.trim().toUpperCase().replace(/\s+/g, ' '));
+}
+
 function isCrmTopLevelBranch(
   row: BranchSummaryRow,
   byId: Map<number, BranchSummaryRow>
@@ -98,4 +109,66 @@ export function resolveTracePlantToWrlBranch(
     return { branch: label, region };
   }
   return null;
+}
+
+export type WrlBranchMetricRow = {
+  branch: string;
+  region: string;
+  total_calls: number;
+  solved_calls: number;
+  cancelled_calls: number;
+  open_calls: number;
+  age_2: number;
+  age_3: number;
+  age_7: number;
+  age_15: number;
+  part_pending: number;
+  active_eng: number;
+};
+
+/**
+ * Roll every CRM office (incl. franchisees) into its WRL parent branch so
+ * Branch body volume matches zone CRM base (not top-level-only undercount).
+ */
+export function rollupCrmOfficesToWrlBranches(
+  branchSummary: BranchSummaryRow[]
+): WrlBranchMetricRow[] {
+  if (!branchSummary.length) return [];
+  const byId = new Map(branchSummary.map((b) => [b.officeId, b]));
+  const map = new Map<string, WrlBranchMetricRow>();
+  for (const office of branchSummary) {
+    const top = crmTopLevelBranch(office, byId);
+    if (isMailBodyHiddenBranch(top.branch)) continue;
+    const region = String(top.region || office.region || 'OTHER').toUpperCase();
+    const key = `${region}::${top.branch}`;
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, {
+        branch: top.branch,
+        region,
+        total_calls: Number(office.total_calls || 0),
+        solved_calls: Number(office.solved_calls || 0),
+        cancelled_calls: Number(office.cancelled_calls || 0),
+        open_calls: Number(office.open_calls || 0),
+        age_2: Number(office.age_2 || 0),
+        age_3: Number(office.age_3 || 0),
+        age_7: Number(office.age_7 || 0),
+        age_15: Number(office.age_15 || 0),
+        part_pending: Number(office.part_pending || 0),
+        active_eng: Number(office.active_eng || 0),
+      });
+      continue;
+    }
+    prev.total_calls += Number(office.total_calls || 0);
+    prev.solved_calls += Number(office.solved_calls || 0);
+    prev.cancelled_calls += Number(office.cancelled_calls || 0);
+    prev.open_calls += Number(office.open_calls || 0);
+    prev.age_2 += Number(office.age_2 || 0);
+    prev.age_3 += Number(office.age_3 || 0);
+    prev.age_7 += Number(office.age_7 || 0);
+    prev.age_15 += Number(office.age_15 || 0);
+    prev.part_pending += Number(office.part_pending || 0);
+    prev.active_eng = Math.max(prev.active_eng, Number(office.active_eng || 0));
+  }
+  return [...map.values()];
 }
