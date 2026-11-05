@@ -324,6 +324,188 @@ export async function listClaimFacts(opts: {
   });
 }
 
+export type ClaimsByMgBasis = 'wp-active' | 'crm-w';
+
+export type ClaimsByMaterialDefectRow = {
+  materialGroup: string;
+  uniqueUnits: number;
+  callCount: number;
+  majorCalls: number;
+  minorCalls: number;
+  repairCost: number;
+  travelingReimbursement: number;
+  sparePartsCost: number;
+  totalCost: number;
+};
+
+export type ClaimsByMaterialDefectResponse = {
+  periodYm: string;
+  monthStart: string;
+  asOf: string;
+  basis: ClaimsByMgBasis;
+  rows: ClaimsByMaterialDefectRow[];
+  totals: {
+    uniqueUnits: number;
+    callCount: number;
+    majorCalls: number;
+    minorCalls: number;
+    repairCost: number;
+    travelingReimbursement: number;
+    sparePartsCost: number;
+    totalCost: number;
+  };
+};
+
+const OUR_SERIAL = `^[0-9]{14}$`;
+
+export function parseClaimsByMgBasis(
+  raw: string | null | undefined
+): ClaimsByMgBasis {
+  const s = (raw ?? '').trim().toLowerCase();
+  if (s === 'crm-w' || s === 'crm' || s === 'wco') return 'crm-w';
+  return 'wp-active';
+}
+
+/**
+ * SNAP under-panel: same Breakdown call set as the year tables, costs/MG from claim facts.
+ * basis=wp-active → Active WP match; basis=crm-w → hot WCO=W.
+ */
+export async function queryClaimsByMaterialDefect(
+  periodYmRaw: string,
+  basisRaw: string | null | undefined = 'wp-active'
+): Promise<ClaimsByMaterialDefectResponse> {
+  const periodYm = parsePeriodYm(periodYmRaw);
+  const monthStart = monthStartIso(periodYm);
+  const asOf = asOfFromPeriodYm(periodYm);
+  const basis = parseClaimsByMgBasis(basisRaw);
+
+  const callsCte =
+    basis === 'crm-w'
+      ? `
+      month_calls AS (
+        SELECT
+          h.vtrnno AS trn,
+          btrim(h.serial) AS serial,
+          coalesce(h.is_major, false) AS is_major
+        FROM calls_latest_hot h
+        WHERE upper(trim(coalesce(h.call_type, ''))) = 'BREAKDOWN'
+          AND h.status_bucket IN ('solved'::status_bucket_type, 'tech_solved'::status_bucket_type)
+          AND upper(trim(coalesce(h.wco, ''))) = 'W'
+          AND btrim(h.serial) ~ '${OUR_SERIAL}'
+          AND h.solved_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+          AND h.solved_at < ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+      )`
+      : `
+      month_calls AS (
+        SELECT
+          h.vtrnno AS trn,
+          btrim(h.serial) AS serial,
+          coalesce(h.is_major, false) AS is_major
+        FROM calls_latest_hot h
+        WHERE upper(trim(coalesce(h.call_type, ''))) = 'BREAKDOWN'
+          AND h.status_bucket IN ('solved'::status_bucket_type, 'tech_solved'::status_bucket_type)
+          AND btrim(h.serial) ~ '${OUR_SERIAL}'
+          AND h.solved_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+          AND h.solved_at < ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+      ),
+      matched AS (
+        SELECT c.trn, c.serial, c.is_major
+        FROM month_calls c
+        WHERE EXISTS (
+          SELECT 1
+          FROM warranty_provision_rows w
+          WHERE w.serial_number = c.serial
+            AND w.warranty_end_date IS NOT NULL
+            AND w.warranty_end_date > $2::date
+            AND w.billing_date IS NOT NULL
+            AND w.billing_date < $2::date
+        )
+      )`;
+
+  const fromAlias = basis === 'crm-w' ? 'month_calls' : 'matched';
+
+  return withAppClient(async (client) => {
+    await ensureSchema(client);
+    const { rows } = await client.query<{
+      material_group: string;
+      unique_units: string;
+      call_count: string;
+      major_calls: string;
+      minor_calls: string;
+      repair_cost: string;
+      traveling_reimbursement: string;
+      spare_parts_cost: string;
+      total_cost: string;
+    }>(
+      `
+      WITH ${callsCte}
+      SELECT
+        COALESCE(
+          NULLIF(btrim(f.material_group), ''),
+          NULLIF(btrim(w.material_group), ''),
+          '(blank)'
+        ) AS material_group,
+        COUNT(DISTINCT c.serial)::text AS unique_units,
+        COUNT(*)::text AS call_count,
+        COUNT(*) FILTER (WHERE c.is_major)::text AS major_calls,
+        COUNT(*) FILTER (WHERE NOT c.is_major)::text AS minor_calls,
+        COALESCE(SUM(f.repair_cost), 0)::text AS repair_cost,
+        COALESCE(SUM(f.traveling_reimbursement), 0)::text AS traveling_reimbursement,
+        COALESCE(SUM(f.spare_parts_cost), 0)::text AS spare_parts_cost,
+        COALESCE(SUM(f.total_cost), 0)::text AS total_cost
+      FROM ${fromAlias} c
+      LEFT JOIN warranty_claim_facts f ON f.claim_no = c.trn
+      LEFT JOIN LATERAL (
+        SELECT material_group
+        FROM warranty_provision_rows w
+        WHERE w.serial_number = c.serial
+        ORDER BY w.id
+        LIMIT 1
+      ) w ON true
+      GROUP BY 1
+      ORDER BY 1
+      `,
+      [monthStart, asOf]
+    );
+
+    const out: ClaimsByMaterialDefectRow[] = rows.map((r) => ({
+      materialGroup: r.material_group,
+      uniqueUnits: Number(r.unique_units) || 0,
+      callCount: Number(r.call_count) || 0,
+      majorCalls: Number(r.major_calls) || 0,
+      minorCalls: Number(r.minor_calls) || 0,
+      repairCost: Number(r.repair_cost) || 0,
+      travelingReimbursement: Number(r.traveling_reimbursement) || 0,
+      sparePartsCost: Number(r.spare_parts_cost) || 0,
+      totalCost: Number(r.total_cost) || 0,
+    }));
+
+    const totals = {
+      uniqueUnits: out.reduce((a, r) => a + r.uniqueUnits, 0),
+      callCount: out.reduce((a, r) => a + r.callCount, 0),
+      majorCalls: out.reduce((a, r) => a + r.majorCalls, 0),
+      minorCalls: out.reduce((a, r) => a + r.minorCalls, 0),
+      repairCost: out.reduce((a, r) => a + r.repairCost, 0),
+      travelingReimbursement: out.reduce((a, r) => a + r.travelingReimbursement, 0),
+      sparePartsCost: out.reduce((a, r) => a + r.sparePartsCost, 0),
+      totalCost: out.reduce((a, r) => a + r.totalCost, 0),
+    };
+
+    // Unique units can overlap material groups if a serial has multiple MGs (shouldn't);
+    // recompute distinct across the call set so footer matches Breakdown Machines.
+    const uniq = await client.query<{ n: string }>(
+      `
+      WITH ${callsCte}
+      SELECT COUNT(DISTINCT c.serial)::text AS n FROM ${fromAlias} c
+      `,
+      [monthStart, asOf]
+    );
+    totals.uniqueUnits = Number(uniq.rows[0]?.n ?? 0) || 0;
+
+    return { periodYm, monthStart, asOf, basis, rows: out, totals };
+  });
+}
+
 export async function claimFactRateStats(asOf: string): Promise<{
   totalClaims: number;
   matchedClaims: number;

@@ -49,6 +49,11 @@ export type {
   BreakdownMismatchResponse,
   BreakdownMismatchRow,
 } from '@/modules/warranty-provision/server/breakdown-mfg';
+export type {
+  ClaimsByMgBasis,
+  ClaimsByMaterialDefectResponse,
+  ClaimsByMaterialDefectRow,
+} from '@/modules/warranty-provision/server/claim-facts';
 
 export type WarrantyClaimRow = {
   id: number;

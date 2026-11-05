@@ -5,6 +5,7 @@ import type {
   BreakdownMfgDetailResponse,
   BreakdownMismatchResponse,
 } from '@/modules/warranty-provision/server/breakdown-mfg';
+import type { ClaimsByMaterialDefectResponse } from '@/modules/warranty-provision/server/claim-facts';
 import type { WarrantyForecastResponse } from '@/modules/warranty-provision/types';
 import { UNITS_TEMPLATE_HEADERS } from '@/modules/warranty-provision/server/units-import';
 
@@ -133,6 +134,91 @@ export async function buildSnapWorkbook(snap: SnapResponse): Promise<Buffer> {
     'Source',
     'warranty_provision_rows · billing_date < as-of · coverage by FY',
   ]);
+  notes.columns.forEach((c) => {
+    c.width = 28;
+  });
+  const buf = await wb.xlsx.writeBuffer();
+  return Buffer.from(buf);
+}
+
+export async function buildClaimsByMgWorkbook(
+  data: ClaimsByMaterialDefectResponse
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Claims by MG');
+  ws.addRow([
+    'Material group',
+    'Unique units',
+    'Call count',
+    'Major',
+    'Minor',
+    'Repair cost',
+    'Traveling reimbursement',
+    'Spare parts',
+    'Total',
+  ]);
+  ws.getRow(1).font = { bold: true };
+  for (const r of data.rows) {
+    ws.addRow([
+      r.materialGroup,
+      r.uniqueUnits,
+      r.callCount,
+      r.majorCalls,
+      r.minorCalls,
+      r.repairCost,
+      r.travelingReimbursement,
+      r.sparePartsCost,
+      r.totalCost,
+    ]);
+  }
+  const tot = ws.addRow([
+    'Total',
+    data.totals.uniqueUnits,
+    data.totals.callCount,
+    data.totals.majorCalls,
+    data.totals.minorCalls,
+    data.totals.repairCost,
+    data.totals.travelingReimbursement,
+    data.totals.sparePartsCost,
+    data.totals.totalCost,
+  ]);
+  tot.font = { bold: true };
+  ws.eachRow((row, ri) => {
+    if (ri === 1) return;
+    for (const i of [2, 3, 4, 5]) {
+      row.getCell(i).numFmt = '#,##,##0';
+    }
+    for (const i of [6, 7, 8, 9]) {
+      row.getCell(i).numFmt = '#,##,##0.00';
+    }
+  });
+  ws.columns = [
+    { width: 18 },
+    { width: 12 },
+    { width: 11 },
+    { width: 9 },
+    { width: 9 },
+    { width: 12 },
+    { width: 14 },
+    { width: 12 },
+    { width: 12 },
+  ];
+  const notes = wb.addWorksheet('Notes');
+  notes.addRow(['Item', 'Value']);
+  notes.getRow(1).font = { bold: true };
+  notes.addRow(['Period', data.periodYm]);
+  notes.addRow(['As of', data.asOf]);
+  notes.addRow([
+    'Basis',
+    data.basis === 'crm-w'
+      ? 'Breakdown CRM WCO=W'
+      : 'Breakdown Active WP',
+  ]);
+  notes.addRow([
+    'Source',
+    'Breakdown call set · costs/MG from warranty_claim_facts (+ WP MG fallback)',
+  ]);
+  notes.addRow(['Grain', 'Material group']);
   notes.columns.forEach((c) => {
     c.width = 28;
   });

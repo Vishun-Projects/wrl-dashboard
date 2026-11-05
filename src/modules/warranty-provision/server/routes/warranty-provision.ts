@@ -22,6 +22,7 @@ import { fyStartYear, parsePeriodYm, todayIsoIst } from '@/modules/warranty-prov
 import {
   buildActiveUnitsWorkbook,
   buildBreakdownDetailWorkbook,
+  buildClaimsByMgWorkbook,
   buildClaimsTemplateWorkbook,
   buildForecastWorkbook,
   buildMismatchWorkbook,
@@ -30,6 +31,7 @@ import {
 } from '@/modules/warranty-provision/server/excel-export';
 import { loadUserAuth } from '@/lib/auth/load-user-auth';
 import { isSuperAdmin } from '@/lib/auth/rbac-catalog';
+import { queryClaimsByMaterialDefect } from '@/modules/warranty-provision/server/claim-facts';
 import {
   commitClaims,
   getAssumptions,
@@ -246,6 +248,24 @@ export async function GET(req: NextRequest) {
         pageSize,
         q: (searchParams.get('q') ?? '').trim(),
       });
+      return NextResponse.json(data);
+    }
+
+    if (mode === 'claims-by-mg' || mode === 'claims-by-mg-export') {
+      const periodYm = searchParams.get('periodYm') ?? searchParams.get('asOf') ?? '';
+      const basis = searchParams.get('basis') ?? 'wp-active';
+      const data = await queryClaimsByMaterialDefect(periodYm, basis);
+      if (mode === 'claims-by-mg-export') {
+        const buffer = await buildClaimsByMgWorkbook(data);
+        const tag = data.basis === 'crm-w' ? 'CRM_WCO' : 'Active_WP';
+        return new NextResponse(new Uint8Array(buffer), {
+          headers: {
+            'Content-Type':
+              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition': `attachment; filename="Warranty_ClaimsByMG_${tag}_${data.periodYm}.xlsx"`,
+          },
+        });
+      }
       return NextResponse.json(data);
     }
 

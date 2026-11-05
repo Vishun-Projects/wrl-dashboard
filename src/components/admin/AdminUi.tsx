@@ -120,6 +120,23 @@ export function AdminThead({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Sticky bottom totals row — pair with overflow scroll on the table wrapper. */
+export function AdminTfoot({
+  children,
+  className = '',
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <tfoot
+      className={`sticky bottom-0 z-10 border-t border-slate-300 bg-amber-50 [&_td]:bg-amber-50 ${className}`}
+    >
+      {children}
+    </tfoot>
+  );
+}
+
 export function AdminTh<K extends string = string>({
   children,
   className = '',

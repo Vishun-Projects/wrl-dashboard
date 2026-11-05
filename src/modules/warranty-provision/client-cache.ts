@@ -6,6 +6,7 @@
 import type {
   ActiveUnitsResponse,
   BreakdownMfgResponse,
+  ClaimsByMaterialDefectResponse,
   SnapResponse,
   WarrantyAssumptions,
   WarrantyClaimRow,
@@ -80,10 +81,12 @@ export type SnapBundle = {
   active: ActiveUnitsResponse | null;
   breakdown: BreakdownMfgResponse | null;
   breakdownWco: BreakdownMfgResponse | null;
+  claimsByMgWp: ClaimsByMaterialDefectResponse | null;
+  claimsByMgCrm: ClaimsByMaterialDefectResponse | null;
 };
 
 /** Bump when SNAP/active/breakdown payload semantics change (invalidates session cache). */
-export const SNAP_CACHE_VER = 'v4-bd-major';
+export const SNAP_CACHE_VER = 'v8-claims-by-mg-basis';
 
 const VER_SS_KEY = `${SS_PREFIX}ver`;
 
@@ -99,7 +102,7 @@ export function ensureWarrantyCacheVersion(): void {
 }
 
 export function snapCacheKey(qs: string, asOf: string, periodYm: string): string {
-  return `snap:${SNAP_CACHE_VER}:${qs}|active:${asOf}|bd:${periodYm}|wco`;
+  return `snap:${SNAP_CACHE_VER}:${qs}|active:${asOf}|bd:${periodYm}|wco|mg`;
 }
 
 export function unitsCacheKey(qs: string): string {

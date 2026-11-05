@@ -11,7 +11,14 @@ import {
 } from 'react';
 import { ChevronLeft, ChevronRight, Copy, Download, RefreshCw, Shield, Upload, X } from 'lucide-react';
 import { PageShell } from '@/components/layout/PageShell';
-import { AdminTable, AdminTd, AdminTh, AdminThead, AdminTr } from '@/components/admin/AdminUi';
+import {
+  AdminTable,
+  AdminTd,
+  AdminTfoot,
+  AdminTh,
+  AdminThead,
+  AdminTr,
+} from '@/components/admin/AdminUi';
 import { FilterSelect } from '@/components/filters/FilterSelect';
 import type { FilterSelectOption } from '@/components/filters/filter-select-types';
 import { ModalBackdrop } from '@/components/ui/ModalBackdrop';
@@ -44,6 +51,8 @@ import type {
   BreakdownMfgDetailResponse,
   BreakdownMfgResponse,
   BreakdownMismatchResponse,
+  ClaimsByMgBasis,
+  ClaimsByMaterialDefectResponse,
   SnapResponse,
   WarrantyAssumptions,
   WarrantyClaimRow,
@@ -232,6 +241,13 @@ export default function WarrantyProvisionPageClient() {
   const [activeUnits, setActiveUnits] = useState<ActiveUnitsResponse | null>(null);
   const [breakdownMfg, setBreakdownMfg] = useState<BreakdownMfgResponse | null>(null);
   const [breakdownWco, setBreakdownWco] = useState<BreakdownMfgResponse | null>(null);
+  const [claimsByMgBasis, setClaimsByMgBasis] = useState<ClaimsByMgBasis>('wp-active');
+  const [claimsByMgWp, setClaimsByMgWp] =
+    useState<ClaimsByMaterialDefectResponse | null>(null);
+  const [claimsByMgCrm, setClaimsByMgCrm] =
+    useState<ClaimsByMaterialDefectResponse | null>(null);
+  const claimsByMg =
+    claimsByMgBasis === 'crm-w' ? claimsByMgCrm : claimsByMgWp;
   const [bdDetailYear, setBdDetailYear] = useState<string | null>(null);
   const [bdDetailBasis, setBdDetailBasis] = useState<'wp-active' | 'crm-w'>('wp-active');
   const [bdDetailMajor, setBdDetailMajor] = useState<'' | 'major' | 'minor'>('');
@@ -307,13 +323,22 @@ export default function WarrantyProvisionPageClient() {
     const key = snapCacheKey(snapQs.toString(), asOf, periodYm);
     const cached = cacheGet<SnapBundle>(key);
     setLoadingLabel('Loading SNAP / breakdown…');
-    if (cached) {
+    // Incomplete bundle (missing claims-by-mg basis) → refetch.
+    if (cached?.snap && cached.claimsByMgWp && cached.claimsByMgCrm) {
       setSnap(cached.snap);
       setActiveUnits(cached.active);
       setBreakdownMfg(cached.breakdown);
       setBreakdownWco(cached.breakdownWco);
+      setClaimsByMgWp(cached.claimsByMgWp);
+      setClaimsByMgCrm(cached.claimsByMgCrm);
       setLoading(false);
       return;
+    }
+    if (cached?.snap) {
+      setSnap(cached.snap);
+      setActiveUnits(cached.active);
+      setBreakdownMfg(cached.breakdown);
+      setBreakdownWco(cached.breakdownWco);
     }
     setLoading(true);
     try {
@@ -361,18 +386,50 @@ export default function WarrantyProvisionPageClient() {
         setBreakdownWco(data);
         return data;
       });
+      const mgWpP = fetch(
+        `${API}?mode=claims-by-mg&periodYm=${encodeURIComponent(periodYm)}&basis=wp-active`,
+        { credentials: 'include' }
+      ).then(async (res) => {
+        if (!res.ok) {
+          const errBody = (await res.json().catch(() => null)) as { error?: string } | null;
+          feedback.actionFailed(errBody?.error || `Claims by MG (WP) failed (${res.status})`);
+          setClaimsByMgWp(null);
+          return null;
+        }
+        const data = (await res.json()) as ClaimsByMaterialDefectResponse;
+        setClaimsByMgWp(data);
+        return data;
+      });
+      const mgCrmP = fetch(
+        `${API}?mode=claims-by-mg&periodYm=${encodeURIComponent(periodYm)}&basis=crm-w`,
+        { credentials: 'include' }
+      ).then(async (res) => {
+        if (!res.ok) {
+          const errBody = (await res.json().catch(() => null)) as { error?: string } | null;
+          feedback.actionFailed(errBody?.error || `Claims by MG (CRM) failed (${res.status})`);
+          setClaimsByMgCrm(null);
+          return null;
+        }
+        const data = (await res.json()) as ClaimsByMaterialDefectResponse;
+        setClaimsByMgCrm(data);
+        return data;
+      });
 
-      const [snapData, activeData, bdData, wcoData] = await Promise.all([
+      const [snapData, activeData, bdData, wcoData, mgWpData, mgCrmData] = await Promise.all([
         snapP,
         activeP,
         bdP,
         wcoP,
+        mgWpP,
+        mgCrmP,
       ]);
       cacheSet(key, {
         snap: snapData,
         active: activeData,
         breakdown: bdData,
         breakdownWco: wcoData,
+        claimsByMgWp: mgWpData,
+        claimsByMgCrm: mgCrmData,
       });
     } catch (e) {
       feedback.actionFailed(e instanceof Error ? e.message : 'SNAP failed');
@@ -826,6 +883,7 @@ export default function WarrantyProvisionPageClient() {
   const activeGridRef = useRef<HTMLDivElement>(null);
   const breakdownGridRef = useRef<HTMLDivElement>(null);
   const breakdownWcoGridRef = useRef<HTMLDivElement>(null);
+  const claimsByMgGridRef = useRef<HTMLDivElement>(null);
   const unitsGridRef = useRef<HTMLDivElement>(null);
 
   function copyTableBtn(gridRef: RefObject<HTMLDivElement | null>) {
@@ -972,7 +1030,7 @@ export default function WarrantyProvisionPageClient() {
     }
   }
 
-  type SnapExportKind = 'snap' | 'active' | 'bd-wp' | 'bd-crm';
+  type SnapExportKind = 'snap' | 'active' | 'bd-wp' | 'bd-crm' | 'claims-mg';
 
   async function downloadSnapReport(kind: SnapExportKind) {
     setSnapExportMenuOpen(false);
@@ -989,6 +1047,15 @@ export default function WarrantyProvisionPageClient() {
         label: 'Active units',
         url: `${API}?mode=active-units-export&asOf=${encodeURIComponent(asOf)}`,
         filename: `Warranty_ActiveUnits_${asOf}.xlsx`,
+      });
+      return;
+    }
+    if (kind === 'claims-mg') {
+      const tag = claimsByMgBasis === 'crm-w' ? 'CRM_WCO' : 'Active_WP';
+      await downloadExcel({
+        label: 'Claims by material group',
+        url: `${API}?mode=claims-by-mg-export&periodYm=${encodeURIComponent(periodYm)}&basis=${claimsByMgBasis}`,
+        filename: `Warranty_ClaimsByMG_${tag}_${periodYm}.xlsx`,
       });
       return;
     }
@@ -1235,6 +1302,11 @@ export default function WarrantyProvisionPageClient() {
                           title: 'Breakdown · CRM WCO=W — call dump',
                           hint: 'All WCO=W solved Breakdown calls for the period',
                         },
+                        {
+                          kind: 'claims-mg' as const,
+                          title: 'Claims by material group',
+                          hint: 'Unique units, major/minor, costs for the period',
+                        },
                       ] as const
                     ).map((opt) => (
                       <button
@@ -1263,7 +1335,8 @@ export default function WarrantyProvisionPageClient() {
                     : ''}
               </span>
             </div>
-            <div className="flex min-h-0 w-full flex-1 items-stretch gap-3 overflow-x-auto overflow-y-hidden custom-scrollbar">
+            <div className="flex min-h-0 w-full flex-1 flex-col gap-2 overflow-hidden">
+            <div className="flex min-h-0 w-full flex-[3] items-stretch gap-3 overflow-x-auto overflow-y-hidden custom-scrollbar">
               <div
                 ref={snapGridRef}
                 className="wp-copy-grid flex min-h-0 min-w-0 flex-[2] flex-col overflow-hidden rounded-xl border border-slate-300 bg-bg-canvas"
@@ -1313,7 +1386,9 @@ export default function WarrantyProvisionPageClient() {
                           </AdminTd>
                         </AdminTr>
                       ))}
-                      {snap ? (
+                    </tbody>
+                    {snap ? (
+                      <AdminTfoot>
                         <AdminTr data-row-index={snap.rows.length}>
                           <AdminTd
                             className={`font-bold ${cellSelected('snap', snap.rows.length, 0) ? CELL_SEL_CLS : ''}`}
@@ -1336,8 +1411,8 @@ export default function WarrantyProvisionPageClient() {
                             {inr(snap.grandTotal)}
                           </AdminTd>
                         </AdminTr>
-                      ) : null}
-                    </tbody>
+                      </AdminTfoot>
+                    ) : null}
                   </AdminTable>
                 </div>
               </div>
@@ -1389,7 +1464,9 @@ export default function WarrantyProvisionPageClient() {
                           </AdminTd>
                         </AdminTr>
                       ))}
-                      {activeUnits ? (
+                    </tbody>
+                    {activeUnits ? (
+                      <AdminTfoot>
                         <AdminTr data-row-index={activeUnits.rows.length}>
                           <AdminTd
                             className={`font-bold ${cellSelected('active', activeUnits.rows.length, 0) ? CELL_SEL_CLS : ''}`}
@@ -1409,21 +1486,32 @@ export default function WarrantyProvisionPageClient() {
                             {inrExact(activeUnits.totalBilling)}
                           </AdminTd>
                         </AdminTr>
-                      ) : null}
-                    </tbody>
+                      </AdminTfoot>
+                    ) : null}
                   </AdminTable>
                 </div>
               </div>
 
               <div
                 ref={breakdownGridRef}
-                className="wp-copy-grid flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-300 bg-bg-canvas"
+                className={`wp-copy-grid flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-bg-canvas transition-[border-color,box-shadow] duration-200 ${
+                  claimsByMgBasis === 'wp-active'
+                    ? 'border-sky-400 shadow-[0_0_0_1px_rgba(56,189,248,0.35)]'
+                    : 'border-slate-300'
+                }`}
                 {...gridSelectHandlers('breakdown')}
               >
                 <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200 px-3 py-2">
                   <div className="min-w-0">
-                    <div className="text-[12px] font-semibold text-slate-800">
-                      Breakdown solved · machines by mfg year
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-[12px] font-semibold text-slate-800">
+                        Breakdown solved · machines by mfg year
+                      </div>
+                      {claimsByMgBasis === 'wp-active' ? (
+                        <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800">
+                          Claims MG source
+                        </span>
+                      ) : null}
                     </div>
                     <div className="mt-0.5 text-[11px] leading-snug text-slate-500">
                       14-digit · Active WP · click year / Major / Minor for calls
@@ -1489,7 +1577,9 @@ export default function WarrantyProvisionPageClient() {
                           </AdminTd>
                         </AdminTr>
                       ))}
-                      {breakdownMfg ? (
+                    </tbody>
+                    {breakdownMfg ? (
+                      <AdminTfoot>
                         <AdminTr data-row-index={breakdownMfg.rows.length}>
                           <AdminTd
                             className={`font-bold ${cellSelected('breakdown', breakdownMfg.rows.length, 0) ? CELL_SEL_CLS : ''}`}
@@ -1521,21 +1611,32 @@ export default function WarrantyProvisionPageClient() {
                             {fmtMajorPct(breakdownMfg.totalMajorPct)}
                           </AdminTd>
                         </AdminTr>
-                      ) : null}
-                    </tbody>
+                      </AdminTfoot>
+                    ) : null}
                   </AdminTable>
                 </div>
               </div>
 
               <div
                 ref={breakdownWcoGridRef}
-                className="wp-copy-grid flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-300 bg-bg-canvas"
+                className={`wp-copy-grid flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-bg-canvas transition-[border-color,box-shadow] duration-200 ${
+                  claimsByMgBasis === 'crm-w'
+                    ? 'border-sky-400 shadow-[0_0_0_1px_rgba(56,189,248,0.35)]'
+                    : 'border-slate-300'
+                }`}
                 {...gridSelectHandlers('breakdown-wco')}
               >
                 <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200 px-3 py-2">
                   <div className="min-w-0">
-                    <div className="text-[12px] font-semibold text-slate-800">
-                      Breakdown solved · CRM WCO=W · by mfg year
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-[12px] font-semibold text-slate-800">
+                        Breakdown solved · CRM WCO=W · by mfg year
+                      </div>
+                      {claimsByMgBasis === 'crm-w' ? (
+                        <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800">
+                          Claims MG source
+                        </span>
+                      ) : null}
                     </div>
                     <div className="mt-0.5 text-[11px] leading-snug text-slate-500">
                       hot · WCO=W · 14-digit · click year / Major / Minor for calls
@@ -1601,7 +1702,9 @@ export default function WarrantyProvisionPageClient() {
                           </AdminTd>
                         </AdminTr>
                       ))}
-                      {breakdownWco ? (
+                    </tbody>
+                    {breakdownWco ? (
+                      <AdminTfoot>
                         <AdminTr data-row-index={breakdownWco.rows.length}>
                           <AdminTd
                             className={`font-bold ${cellSelected('breakdown-wco', breakdownWco.rows.length, 0) ? CELL_SEL_CLS : ''}`}
@@ -1633,8 +1736,289 @@ export default function WarrantyProvisionPageClient() {
                             {fmtMajorPct(breakdownWco.totalMajorPct)}
                           </AdminTd>
                         </AdminTr>
+                      </AdminTfoot>
+                    ) : null}
+                  </AdminTable>
+                </div>
+              </div>
+            </div>
+
+              <div
+                ref={claimsByMgGridRef}
+                className="wp-copy-grid flex max-h-[42%] min-h-[10rem] w-full shrink-0 flex-col overflow-hidden rounded-xl border border-slate-300 bg-bg-canvas"
+                {...gridSelectHandlers('claims-by-mg')}
+              >
+                <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200 px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[12px] font-semibold text-slate-800">
+                      Claims by material group
+                    </div>
+                    <div className="mt-0.5 text-[11px] leading-snug text-slate-500">
+                      {periodYm} · call set from{' '}
+                      {claimsByMgBasis === 'crm-w'
+                        ? 'Breakdown · CRM WCO=W'
+                        : 'Breakdown · Active WP'}{' '}
+                      · costs from claim facts
+                      {claimsByMg ? (
+                        <>
+                          {' '}
+                          · Major {inrExact(claimsByMg.totals.majorCalls)} · Minor{' '}
+                          {inrExact(claimsByMg.totals.minorCalls)}
+                        </>
                       ) : null}
+                    </div>
+                    <div
+                      role="radiogroup"
+                      aria-label="Claims by material group call set"
+                      className="relative mt-2 inline-grid grid-cols-2 rounded-lg border border-slate-200 bg-slate-100 p-0.5"
+                      onKeyDown={(e) => {
+                        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+                        e.preventDefault();
+                        setClaimsByMgBasis(
+                          e.key === 'ArrowLeft' ? 'wp-active' : 'crm-w',
+                        );
+                      }}
+                    >
+                      <span
+                        aria-hidden
+                        className={`pointer-events-none absolute inset-y-0.5 left-0.5 w-[calc(50%-2px)] rounded-md bg-white shadow-sm ring-1 ring-slate-200/80 transition-transform duration-200 ease-out ${
+                          claimsByMgBasis === 'crm-w'
+                            ? 'translate-x-full'
+                            : 'translate-x-0'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={claimsByMgBasis === 'wp-active'}
+                        onClick={() => setClaimsByMgBasis('wp-active')}
+                        className={`relative z-10 rounded-md px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors ${
+                          claimsByMgBasis === 'wp-active'
+                            ? 'text-slate-900'
+                            : 'text-slate-500 hover:text-slate-700'
+                        }`}
+                      >
+                        <span className="block leading-tight">Machines by mfg year</span>
+                        <span className="mt-0.5 block text-[10px] font-normal text-slate-500">
+                          Active WP
+                          {claimsByMgWp
+                            ? ` · ${inrExact(claimsByMgWp.totals.majorCalls)} / ${inrExact(claimsByMgWp.totals.minorCalls)}`
+                            : ''}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={claimsByMgBasis === 'crm-w'}
+                        onClick={() => setClaimsByMgBasis('crm-w')}
+                        className={`relative z-10 rounded-md px-2.5 py-1.5 text-left text-[11px] font-medium transition-colors ${
+                          claimsByMgBasis === 'crm-w'
+                            ? 'text-slate-900'
+                            : 'text-slate-500 hover:text-slate-700'
+                        }`}
+                      >
+                        <span className="block leading-tight">CRM WCO=W by mfg year</span>
+                        <span className="mt-0.5 block text-[10px] font-normal text-slate-500">
+                          CRM WCO=W
+                          {claimsByMgCrm
+                            ? ` · ${inrExact(claimsByMgCrm.totals.majorCalls)} / ${inrExact(claimsByMgCrm.totals.minorCalls)}`
+                            : ''}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                  {copyTableBtn(claimsByMgGridRef)}
+                </div>
+                <div
+                  key={claimsByMgBasis}
+                  className="min-h-0 flex-1 overflow-auto custom-scrollbar"
+                >
+                  <AdminTable className="w-full border-collapse text-[13px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-2.5 [&_th]:py-2 [&_th]:text-[12px] [&_th]:font-semibold [&_td]:border [&_td]:border-slate-300 [&_td]:px-2.5 [&_td]:py-1.5 [&_td]:text-[13px] [&_tr]:border-0">
+                    <AdminThead>
+                      <tr>
+                        <AdminTh>Material group</AdminTh>
+                        <AdminTh align="right">Unique units</AdminTh>
+                        <AdminTh align="right">Call count</AdminTh>
+                        <AdminTh align="right">Major</AdminTh>
+                        <AdminTh align="right">Minor</AdminTh>
+                        <AdminTh align="right">Repair cost</AdminTh>
+                        <AdminTh align="right">Traveling reimbursement</AdminTh>
+                        <AdminTh align="right">Spare parts</AdminTh>
+                        <AdminTh align="right">Total</AdminTh>
+                      </tr>
+                    </AdminThead>
+                    <tbody>
+                      {(claimsByMg?.rows ?? []).map((r, ri) => (
+                        <AdminTr key={`${r.materialGroup}|${ri}`} data-row-index={ri}>
+                          <AdminTd
+                            className={
+                              cellSelected('claims-by-mg', ri, 0) ? CELL_SEL_CLS : ''
+                            }
+                          >
+                            {r.materialGroup}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={
+                              cellSelected('claims-by-mg', ri, 1) ? CELL_SEL_CLS : ''
+                            }
+                          >
+                            {inrExact(r.uniqueUnits)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={
+                              cellSelected('claims-by-mg', ri, 2) ? CELL_SEL_CLS : ''
+                            }
+                          >
+                            {inrExact(r.callCount)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={
+                              cellSelected('claims-by-mg', ri, 3) ? CELL_SEL_CLS : ''
+                            }
+                          >
+                            {inrExact(r.majorCalls)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={
+                              cellSelected('claims-by-mg', ri, 4) ? CELL_SEL_CLS : ''
+                            }
+                          >
+                            {inrExact(r.minorCalls)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={
+                              cellSelected('claims-by-mg', ri, 5) ? CELL_SEL_CLS : ''
+                            }
+                          >
+                            {inrMoney(r.repairCost)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={
+                              cellSelected('claims-by-mg', ri, 6) ? CELL_SEL_CLS : ''
+                            }
+                          >
+                            {inrMoney(r.travelingReimbursement)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={
+                              cellSelected('claims-by-mg', ri, 7) ? CELL_SEL_CLS : ''
+                            }
+                          >
+                            {inrMoney(r.sparePartsCost)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={
+                              cellSelected('claims-by-mg', ri, 8) ? CELL_SEL_CLS : ''
+                            }
+                          >
+                            {inrMoney(r.totalCost)}
+                          </AdminTd>
+                        </AdminTr>
+                      ))}
                     </tbody>
+                    {claimsByMg ? (
+                      <AdminTfoot>
+                        <AdminTr data-row-index={claimsByMg.rows.length}>
+                          <AdminTd
+                            className={`font-bold ${
+                              cellSelected('claims-by-mg', claimsByMg.rows.length, 0)
+                                ? CELL_SEL_CLS
+                                : ''
+                            }`}
+                          >
+                            Total
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`font-bold ${
+                              cellSelected('claims-by-mg', claimsByMg.rows.length, 1)
+                                ? CELL_SEL_CLS
+                                : ''
+                            }`}
+                          >
+                            {inrExact(claimsByMg.totals.uniqueUnits)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`font-bold ${
+                              cellSelected('claims-by-mg', claimsByMg.rows.length, 2)
+                                ? CELL_SEL_CLS
+                                : ''
+                            }`}
+                          >
+                            {inrExact(claimsByMg.totals.callCount)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`font-bold ${
+                              cellSelected('claims-by-mg', claimsByMg.rows.length, 3)
+                                ? CELL_SEL_CLS
+                                : ''
+                            }`}
+                          >
+                            {inrExact(claimsByMg.totals.majorCalls)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`font-bold ${
+                              cellSelected('claims-by-mg', claimsByMg.rows.length, 4)
+                                ? CELL_SEL_CLS
+                                : ''
+                            }`}
+                          >
+                            {inrExact(claimsByMg.totals.minorCalls)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`font-bold ${
+                              cellSelected('claims-by-mg', claimsByMg.rows.length, 5)
+                                ? CELL_SEL_CLS
+                                : ''
+                            }`}
+                          >
+                            {inrMoney(claimsByMg.totals.repairCost)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`font-bold ${
+                              cellSelected('claims-by-mg', claimsByMg.rows.length, 6)
+                                ? CELL_SEL_CLS
+                                : ''
+                            }`}
+                          >
+                            {inrMoney(claimsByMg.totals.travelingReimbursement)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`font-bold ${
+                              cellSelected('claims-by-mg', claimsByMg.rows.length, 7)
+                                ? CELL_SEL_CLS
+                                : ''
+                            }`}
+                          >
+                            {inrMoney(claimsByMg.totals.sparePartsCost)}
+                          </AdminTd>
+                          <AdminTd
+                            align="right"
+                            className={`font-bold ${
+                              cellSelected('claims-by-mg', claimsByMg.rows.length, 8)
+                                ? CELL_SEL_CLS
+                                : ''
+                            }`}
+                          >
+                            {inrMoney(claimsByMg.totals.totalCost)}
+                          </AdminTd>
+                        </AdminTr>
+                      </AdminTfoot>
+                    ) : null}
                   </AdminTable>
                 </div>
               </div>
