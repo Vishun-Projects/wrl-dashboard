@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import type { SnapResponse } from '@/modules/warranty-provision/server/snap';
+import type { BreakdownMismatchResponse } from '@/modules/warranty-provision/server/breakdown-mfg';
 import type { WarrantyForecastResponse } from '@/modules/warranty-provision/types';
 import { UNITS_TEMPLATE_HEADERS } from '@/modules/warranty-provision/server/units-import';
 
@@ -117,6 +118,63 @@ export async function buildSnapWorkbook(snap: SnapResponse): Promise<Buffer> {
   });
   ws.columns.forEach((c) => {
     c.width = 14;
+  });
+  const buf = await wb.xlsx.writeBuffer();
+  return Buffer.from(buf);
+}
+
+export async function buildMismatchWorkbook(
+  data: BreakdownMismatchResponse
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Mismatched');
+  ws.addRow([
+    'Only in',
+    'Mfg year',
+    'Serial',
+    'TRN',
+    'Party',
+    'WCO',
+    'Solved',
+    'Status',
+    'Warranty end',
+  ]);
+  ws.getRow(1).font = { bold: true };
+  for (const r of data.rows) {
+    ws.addRow([
+      r.onlyIn,
+      r.mfgYear || '',
+      r.serial,
+      r.trn,
+      r.partyName,
+      r.wco,
+      r.solvedDay ?? '',
+      r.statusBucket,
+      r.warrantyEnd ?? '',
+    ]);
+  }
+  ws.columns = [
+    { width: 22 },
+    { width: 10 },
+    { width: 16 },
+    { width: 14 },
+    { width: 28 },
+    { width: 8 },
+    { width: 12 },
+    { width: 14 },
+    { width: 14 },
+  ];
+  const notes = wb.addWorksheet('Summary');
+  notes.addRow(['Item', 'Value']);
+  notes.getRow(1).font = { bold: true };
+  notes.addRow(['Period', data.periodYm]);
+  notes.addRow(['As of', data.asOf]);
+  notes.addRow(['Filter', data.onlyIn || 'All']);
+  notes.addRow(['Rows in sheet', data.rows.length]);
+  notes.addRow(['Warranty Provisioning only', data.wpOnlyCount]);
+  notes.addRow(['CRM only', data.crmOnlyCount]);
+  notes.columns.forEach((c) => {
+    c.width = 28;
   });
   const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf);

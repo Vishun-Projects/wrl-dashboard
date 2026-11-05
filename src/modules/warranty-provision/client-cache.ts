@@ -107,6 +107,15 @@ export function forecastCacheKey(qs: string, scenario: string): string {
   return `forecast:${qs}|${scenario}`;
 }
 
+export function mismatchCacheKey(
+  periodYm: string,
+  onlyIn: string,
+  page: number,
+  pageSize: number
+): string {
+  return `mismatch:${periodYm}|${onlyIn || 'all'}|p:${page}|ps:${pageSize}`;
+}
+
 export type ClaimsCachePayload = {
   rows: WarrantyClaimRow[];
   total: number;

@@ -341,3 +341,42 @@ export async function queryBreakdownMfgDetailCrmW(
     };
   });
 }
+
+/** UI / API label for which side a mismatched call belongs to. */
+export type BreakdownMismatchOnlyIn = 'Warranty Provisioning' | 'CRM';
+
+export type BreakdownMismatchRow = {
+  onlyIn: BreakdownMismatchOnlyIn;
+  mfgYear: number;
+  serial: string;
+  trn: string;
+  partyName: string;
+  wco: string;
+  solvedDay: string | null;
+  statusBucket: string;
+  warrantyEnd: string | null;
+};
+
+export type BreakdownMismatchResponse = {
+  periodYm: string;
+  monthStart: string;
+  monthEndExclusive: string;
+  asOf: string;
+  onlyIn: '' | 'wp' | 'crm';
+  rows: BreakdownMismatchRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  wpOnlyCount: number;
+  crmOnlyCount: number;
+  /** Present when reading the stored mismatch table. */
+  meta?: {
+    periodYm: string;
+    syncedAt: string | null;
+    rowCount: number;
+    wpOnlyCount: number;
+    crmOnlyCount: number;
+    syncedBy: string;
+  };
+};
+

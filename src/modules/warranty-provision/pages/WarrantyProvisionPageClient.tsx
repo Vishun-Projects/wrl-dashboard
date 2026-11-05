@@ -31,6 +31,7 @@ import {
   cacheSet,
   claimsCacheKey,
   forecastCacheKey,
+  mismatchCacheKey,
   ratesCacheKey,
   snapCacheKey,
   unitsCacheKey,
@@ -41,6 +42,7 @@ import type {
   ActiveUnitsResponse,
   BreakdownMfgDetailResponse,
   BreakdownMfgResponse,
+  BreakdownMismatchResponse,
   SnapResponse,
   WarrantyAssumptions,
   WarrantyClaimRow,
@@ -54,7 +56,15 @@ import type {
 const API = '/api/report/warranty-provision';
 const PAGE_SIZES = [100, 250, 500, 1000] as const;
 const CLAIMS_PAGE_SIZES = [50, 100, 200] as const;
-type Tab = 'snap' | 'units' | 'rates' | 'forecast' | 'claims' | 'assumptions';
+const MISMATCH_PAGE_SIZES = [50, 100, 200] as const;
+type Tab =
+  | 'snap'
+  | 'units'
+  | 'rates'
+  | 'forecast'
+  | 'claims'
+  | 'mismatched'
+  | 'assumptions';
 type ClaimsMeta = { syncedAt: string | null; rowCount: number; syncedBy: string };
 type CellSel = { colLo: number; colHi: number; rowLo: number; rowHi: number };
 
@@ -181,7 +191,6 @@ export default function WarrantyProvisionPageClient() {
   const [tab, setTab] = useState<Tab>('snap');
   const [periodYm, setPeriodYm] = useState(prevPeriodYmIst);
   const asOf = useMemo(() => asOfFromPeriodYm(periodYm), [periodYm]);
-  const [strict, setStrict] = useState(false);
   const [fyFrom, setFyFrom] = useState(() => fyStartYear(asOfFromPeriodYm(prevPeriodYmIst())));
   const [fyCount, setFyCount] = useState(6);
 
@@ -225,10 +234,16 @@ export default function WarrantyProvisionPageClient() {
   const [forecast, setForecast] = useState<WarrantyForecastResponse | null>(null);
   const [scenario, setScenario] = useState<'base' | 'optimistic' | 'pessimistic'>('base');
   const [claims, setClaims] = useState<{ rows: WarrantyClaimRow[]; total: number } | null>(null);
+  const [mismatch, setMismatch] = useState<BreakdownMismatchResponse | null>(null);
+  const [mismatchOnlyIn, setMismatchOnlyIn] = useState<'' | 'wp' | 'crm'>('');
+  const [mismatchPage, setMismatchPage] = useState(1);
+  const [mismatchPageSize, setMismatchPageSize] =
+    useState<(typeof MISMATCH_PAGE_SIZES)[number]>(100);
   const [assumptions, setAssumptions] = useState<WarrantyAssumptions | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingLabel, setLoadingLabel] = useState('Loading…');
   const [unitsImportStatus, setUnitsImportStatus] = useState<string>('');
+  const [exporting, setExporting] = useState(false);
 
   /** Rectangular cell select (browser table select always grabs whole rows). */
   const colDragRef = useRef<{
@@ -250,12 +265,11 @@ export default function WarrantyProvisionPageClient() {
   const snapQs = useMemo(() => {
     const p = new URLSearchParams({
       asOf,
-      strict: strict ? '1' : '0',
       fyFrom: String(fyFrom),
       fyCount: String(fyCount),
     });
     return p;
-  }, [asOf, strict, fyFrom, fyCount]);
+  }, [asOf, fyFrom, fyCount]);
 
   useEffect(() => {
     void (async () => {
@@ -495,23 +509,31 @@ export default function WarrantyProvisionPageClient() {
   const resyncClaims = useCallback(async () => {
     if (!canResyncClaims || claimsResyncing) return;
     setClaimsResyncing(true);
-    setLoadingLabel('Resyncing claims from Call Register / ARCP / MB51…');
+    setLoadingLabel(
+      'Resyncing claims + mismatch backfill for all months…'
+    );
     setLoading(true);
     try {
       const res = await fetch(`${API}?mode=claims-resync`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: '{}',
+        body: JSON.stringify({ periodYm }),
       });
-      const data = (await res.json()) as ClaimsMeta & { error?: string };
+      const data = (await res.json()) as ClaimsMeta & {
+        error?: string;
+        mismatch?: { rowCount?: number; totalRows?: number; periods?: number };
+      };
       if (!res.ok) throw new Error(data.error || 'Resync failed');
       setClaimsMeta(data);
       cacheClearWarranty();
+      const mismatchN = data.mismatch?.totalRows ?? data.mismatch?.rowCount ?? 0;
+      const periods = data.mismatch?.periods ?? 0;
       feedback.actionSuccess(
-        `Claims synced · ${(data.rowCount ?? 0).toLocaleString('en-IN')} rows`
+        `Synced · claims ${(data.rowCount ?? 0).toLocaleString('en-IN')} · mismatch ${mismatchN.toLocaleString('en-IN')} across ${periods} months`
       );
       setClaimsPage(1);
+      setMismatchPage(1);
       const listRes = await fetch(
         `${API}?mode=claims&periodYm=${encodeURIComponent(periodYm)}&page=1&pageSize=${claimsPageSize}&q=${encodeURIComponent(claimsQ)}`,
         { credentials: 'include' }
@@ -521,13 +543,40 @@ export default function WarrantyProvisionPageClient() {
       setClaims(listData);
       if (listData.meta) setClaimsMeta(listData.meta);
       cacheSet(claimsCacheKey(periodYm, claimsQ, 1, claimsPageSize), listData);
+
+      const mismatchParams = new URLSearchParams({
+        mode: 'breakdown-mismatch',
+        periodYm,
+        page: '1',
+        pageSize: String(mismatchPageSize),
+      });
+      if (mismatchOnlyIn) mismatchParams.set('onlyIn', mismatchOnlyIn);
+      const mismatchRes = await fetch(`${API}?${mismatchParams}`, {
+        credentials: 'include',
+      });
+      if (mismatchRes.ok) {
+        const mismatchData = (await mismatchRes.json()) as BreakdownMismatchResponse;
+        setMismatch(mismatchData);
+        cacheSet(
+          mismatchCacheKey(periodYm, mismatchOnlyIn, 1, mismatchPageSize),
+          mismatchData
+        );
+      }
     } catch (e) {
       feedback.actionFailed(e instanceof Error ? e.message : 'Resync failed');
     } finally {
       setClaimsResyncing(false);
       setLoading(false);
     }
-  }, [canResyncClaims, claimsResyncing, periodYm, claimsPageSize, claimsQ]);
+  }, [
+    canResyncClaims,
+    claimsResyncing,
+    periodYm,
+    claimsPageSize,
+    claimsQ,
+    mismatchOnlyIn,
+    mismatchPageSize,
+  ]);
 
   const loadAssumptions = useCallback(async () => {
     setLoadingLabel('Loading assumptions…');
@@ -543,6 +592,36 @@ export default function WarrantyProvisionPageClient() {
     }
   }, []);
 
+  const loadMismatch = useCallback(async () => {
+    const key = mismatchCacheKey(periodYm, mismatchOnlyIn, mismatchPage, mismatchPageSize);
+    const cached = cacheGet<BreakdownMismatchResponse>(key);
+    setLoadingLabel(`Loading mismatched calls for ${periodYm}…`);
+    if (cached) {
+      setMismatch(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+    try {
+      const params = new URLSearchParams({
+        mode: 'breakdown-mismatch',
+        periodYm,
+        page: String(mismatchPage),
+        pageSize: String(mismatchPageSize),
+      });
+      if (mismatchOnlyIn) params.set('onlyIn', mismatchOnlyIn);
+      const res = await fetch(`${API}?${params}`, { credentials: 'include' });
+      if (!res.ok) throw new Error('Mismatch load failed');
+      const data = (await res.json()) as BreakdownMismatchResponse;
+      setMismatch(data);
+      cacheSet(key, data);
+    } catch (e) {
+      if (!cached) feedback.actionFailed(e instanceof Error ? e.message : 'Mismatch failed');
+    } finally {
+      setLoading(false);
+    }
+  }, [periodYm, mismatchOnlyIn, mismatchPage, mismatchPageSize]);
+
   useEffect(() => {
     const t = window.setTimeout(() => {
       const next = claimsQDraft.trim();
@@ -554,6 +633,7 @@ export default function WarrantyProvisionPageClient() {
 
   useEffect(() => {
     setClaimsPage(1);
+    setMismatchPage(1);
   }, [periodYm]);
 
   useEffect(() => {
@@ -566,8 +646,18 @@ export default function WarrantyProvisionPageClient() {
     } else if (tab === 'rates') void loadRates();
     else if (tab === 'forecast') void loadForecast();
     else if (tab === 'claims') void loadClaims();
+    else if (tab === 'mismatched') void loadMismatch();
     else if (tab === 'assumptions') void loadAssumptions();
-  }, [tab, loadSnap, loadUnits, loadRates, loadForecast, loadClaims, loadAssumptions]);
+  }, [
+    tab,
+    loadSnap,
+    loadUnits,
+    loadRates,
+    loadForecast,
+    loadClaims,
+    loadMismatch,
+    loadAssumptions,
+  ]);
 
   useEffect(() => {
     const endDrag = () => {
@@ -733,6 +823,8 @@ export default function WarrantyProvisionPageClient() {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const claimsTotal = claims?.total ?? 0;
   const claimsTotalPages = Math.max(1, Math.ceil(claimsTotal / claimsPageSize));
+  const mismatchTotal = mismatch?.total ?? 0;
+  const mismatchTotalPages = Math.max(1, Math.ceil(mismatchTotal / mismatchPageSize));
 
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: 'snap', label: 'SNAP Report' },
@@ -740,52 +832,78 @@ export default function WarrantyProvisionPageClient() {
     { id: 'rates', label: 'Claim rates' },
     { id: 'forecast', label: 'Cost forecast' },
     { id: 'claims', label: 'Claims' },
+    { id: 'mismatched', label: 'Mismatched' },
     { id: 'assumptions', label: 'Assumptions' },
   ];
 
-  async function downloadSnap() {
-    const res = await fetch(`${API}?mode=snap-export&${snapQs}`, { credentials: 'include' });
-    if (!res.ok) {
-      feedback.actionFailed('Export failed');
-      return;
+  async function downloadExcel(opts: {
+    label: string;
+    url: string;
+    filename: string;
+  }) {
+    if (exporting) return;
+    setExporting(true);
+    const toastId = feedback.loading(`Preparing ${opts.label}…`);
+    try {
+      const res = await fetch(opts.url, { credentials: 'include' });
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = opts.filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      feedback.loadingSuccess(toastId, `${opts.label} downloaded`);
+    } catch (e) {
+      feedback.loadingFailed(
+        toastId,
+        e instanceof Error ? e.message : 'Export failed'
+      );
+    } finally {
+      setExporting(false);
     }
-    const blob = await res.blob();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `Warranty_SNAP_${asOf}.xlsx`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+  }
+
+  async function downloadSnap() {
+    await downloadExcel({
+      label: 'SNAP Excel',
+      url: `${API}?mode=snap-export&${snapQs}`,
+      filename: `Warranty_SNAP_${asOf}.xlsx`,
+    });
   }
 
   async function downloadForecast() {
     const p = new URLSearchParams(snapQs);
     p.set('mode', 'forecast-export');
     p.set('scenario', scenario);
-    const res = await fetch(`${API}?${p}`, { credentials: 'include' });
-    if (!res.ok) {
-      feedback.actionFailed('Export failed');
-      return;
-    }
-    const blob = await res.blob();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `Warranty_Forecast_${asOf}.xlsx`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    await downloadExcel({
+      label: 'Forecast Excel',
+      url: `${API}?${p}`,
+      filename: `Warranty_Forecast_${asOf}.xlsx`,
+    });
+  }
+
+  async function downloadMismatch() {
+    const params = new URLSearchParams({
+      mode: 'breakdown-mismatch-export',
+      periodYm,
+    });
+    if (mismatchOnlyIn) params.set('onlyIn', mismatchOnlyIn);
+    const filter =
+      mismatchOnlyIn === 'wp' ? '_WP' : mismatchOnlyIn === 'crm' ? '_CRM' : '';
+    await downloadExcel({
+      label: 'Mismatch Excel',
+      url: `${API}?${params}`,
+      filename: `Warranty_Mismatch_${periodYm}${filter}.xlsx`,
+    });
   }
 
   async function downloadUnitsTemplate() {
-    const res = await fetch(`${API}?mode=units-template`, { credentials: 'include' });
-    if (!res.ok) {
-      feedback.actionFailed('Template download failed');
-      return;
-    }
-    const blob = await res.blob();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'Warranty_Units_Template.xlsx';
-    a.click();
-    URL.revokeObjectURL(a.href);
+    await downloadExcel({
+      label: 'Units template',
+      url: `${API}?mode=units-template`,
+      filename: 'Warranty_Units_Template.xlsx',
+    });
   }
 
   async function onUnitsFile(file: File | null) {
@@ -882,16 +1000,6 @@ export default function WarrantyProvisionPageClient() {
             </select>
             <span className="text-[11px] text-slate-400">as-of {formatUiDate(asOf)}</span>
           </div>
-          {(tab === 'snap' || tab === 'rates' || tab === 'forecast') && (
-            <label className="flex items-center gap-1.5 text-[12px] text-slate-600">
-              <input
-                type="checkbox"
-                checked={strict}
-                onChange={(e) => setStrict(e.target.checked)}
-              />
-              Strict
-            </label>
-          )}
         </div>
       }
       toolbar={
@@ -927,7 +1035,7 @@ export default function WarrantyProvisionPageClient() {
               aria-hidden
             />
             <span className="font-medium">{loadingLabel}</span>
-            <span className="text-sky-700/80">Please wait — large joins can take a few seconds.</span>
+            <span className="text-sky-700/80">Loading...</span>
           </div>
         ) : null}
         {tab === 'snap' && (
@@ -956,10 +1064,11 @@ export default function WarrantyProvisionPageClient() {
               <button
                 type="button"
                 onClick={() => void downloadSnap()}
-                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[12px]"
+                disabled={exporting}
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] disabled:opacity-50"
               >
-                <Download className="h-3.5 w-3.5" />
-                Download Excel
+                <Download className={`h-3.5 w-3.5 ${exporting ? 'animate-pulse' : ''}`} />
+                {exporting ? 'Preparing…' : 'Download Excel'}
               </button>
               <span className="ml-auto text-[12px] text-slate-500">
                 {loading
@@ -1675,10 +1784,11 @@ export default function WarrantyProvisionPageClient() {
               <button
                 type="button"
                 onClick={() => void downloadForecast()}
-                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[12px]"
+                disabled={exporting}
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] disabled:opacity-50"
               >
-                <Download className="h-3.5 w-3.5" />
-                Download Excel
+                <Download className={`h-3.5 w-3.5 ${exporting ? 'animate-pulse' : ''}`} />
+                {exporting ? 'Preparing…' : 'Download Excel'}
               </button>
             </div>
             {forecast ? (
@@ -1901,6 +2011,150 @@ export default function WarrantyProvisionPageClient() {
                 className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-[12px] disabled:opacity-40"
                 disabled={claimsPage >= claimsTotalPages || loading}
                 onClick={() => setClaimsPage((p) => p + 1)}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {tab === 'mismatched' && (
+          <div className="min-h-0 flex-1 space-y-2 overflow-auto p-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[12px] text-slate-500">
+                Stored mismatch · Active WP vs CRM WCO=W · {periodYm}
+                {mismatch?.meta?.syncedAt
+                  ? ` · last sync ${formatUiDate(mismatch.meta.syncedAt)}`
+                  : ' · not synced yet'}
+                {mismatch
+                  ? ` · Warranty Provisioning ${mismatch.wpOnlyCount.toLocaleString('en-IN')} · CRM ${mismatch.crmOnlyCount.toLocaleString('en-IN')}`
+                  : ''}
+              </span>
+              {canResyncClaims ? (
+                <button
+                  type="button"
+                  onClick={() => void resyncClaims()}
+                  disabled={loading || claimsResyncing}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] disabled:opacity-50"
+                >
+                  <RefreshCw
+                    className={`h-3.5 w-3.5 ${claimsResyncing ? 'animate-spin' : ''}`}
+                  />
+                  {claimsResyncing ? 'Resyncing…' : 'Resync'}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => void downloadMismatch()}
+                disabled={
+                  exporting || loading || claimsResyncing || !mismatch?.meta?.syncedAt
+                }
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[12px] disabled:opacity-50"
+              >
+                <Download className={`h-3.5 w-3.5 ${exporting ? 'animate-pulse' : ''}`} />
+                {exporting ? 'Preparing…' : 'Download Excel'}
+              </button>
+              <label className="ml-auto text-[12px] text-slate-500">
+                Only in
+                <select
+                  value={mismatchOnlyIn}
+                  onChange={(e) => {
+                    setMismatchPage(1);
+                    setMismatchOnlyIn(e.target.value as '' | 'wp' | 'crm');
+                  }}
+                  className="ml-1 h-8 rounded border border-slate-200 px-2 text-[12px]"
+                  disabled={loading || claimsResyncing}
+                >
+                  <option value="">All</option>
+                  <option value="wp">Warranty Provisioning</option>
+                  <option value="crm">CRM</option>
+                </select>
+              </label>
+            </div>
+            {!mismatch?.meta?.syncedAt && !loading ? (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
+                No synced mismatch yet
+                {canResyncClaims
+                  ? ' — click Resync to backfill all months at once.'
+                  : ' — ask a superadmin to run Resync.'}
+              </p>
+            ) : null}
+            <AdminTable>
+              <AdminThead>
+                <tr>
+                  <AdminTh>Only in</AdminTh>
+                  <AdminTh>Mfg year</AdminTh>
+                  <AdminTh>Serial</AdminTh>
+                  <AdminTh>TRN</AdminTh>
+                  <AdminTh>Party</AdminTh>
+                  <AdminTh>WCO</AdminTh>
+                  <AdminTh>Solved</AdminTh>
+                  <AdminTh>Status</AdminTh>
+                  <AdminTh>Warranty end</AdminTh>
+                </tr>
+              </AdminThead>
+              <tbody>
+                {(mismatch?.rows ?? []).map((r) => (
+                  <AdminTr key={`${r.onlyIn}-${r.trn}`}>
+                    <AdminTd>{r.onlyIn}</AdminTd>
+                    <AdminTd>{r.mfgYear || '—'}</AdminTd>
+                    <AdminTd className="font-mono text-[11px]">{r.serial}</AdminTd>
+                    <AdminTd className="font-mono text-[11px]">{r.trn}</AdminTd>
+                    <AdminTd className="max-w-[12rem] truncate" title={r.partyName}>
+                      {r.partyName || '—'}
+                    </AdminTd>
+                    <AdminTd>{r.wco || '—'}</AdminTd>
+                    <AdminTd>{r.solvedDay ? formatUiDate(r.solvedDay) : '—'}</AdminTd>
+                    <AdminTd>{r.statusBucket || '—'}</AdminTd>
+                    <AdminTd>
+                      {r.warrantyEnd ? formatUiDate(r.warrantyEnd) : '—'}
+                    </AdminTd>
+                  </AdminTr>
+                ))}
+              </tbody>
+            </AdminTable>
+            {!loading && !(mismatch?.rows.length) ? (
+              <p className="text-[12px] text-slate-500">No mismatched calls for this filter.</p>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-2 px-1 pb-1">
+              <label className="text-[12px] text-slate-500">
+                Rows
+                <select
+                  value={mismatchPageSize}
+                  onChange={(e) => {
+                    setMismatchPage(1);
+                    setMismatchPageSize(
+                      Number(e.target.value) as (typeof MISMATCH_PAGE_SIZES)[number]
+                    );
+                  }}
+                  className="ml-1 h-8 rounded border border-slate-200 px-2 text-[12px]"
+                  disabled={loading}
+                >
+                  {MISMATCH_PAGE_SIZES.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span className="text-[12px] text-slate-500">
+                {loading
+                  ? '…'
+                  : `${mismatchTotal.toLocaleString('en-IN')} rows · Page ${mismatchPage} / ${mismatchTotalPages}`}
+              </span>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-[12px] disabled:opacity-40"
+                disabled={mismatchPage <= 1 || loading}
+                onClick={() => setMismatchPage((p) => Math.max(1, p - 1))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-[12px] disabled:opacity-40"
+                disabled={mismatchPage >= mismatchTotalPages || loading}
+                onClick={() => setMismatchPage((p) => p + 1)}
               >
                 <ChevronRight className="h-4 w-4" />
               </button>

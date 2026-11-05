@@ -45,6 +45,9 @@ export type {
   BreakdownMfgResponse,
   BreakdownMfgResponseWithBasis,
   BreakdownMfgRow,
+  BreakdownMismatchOnlyIn,
+  BreakdownMismatchResponse,
+  BreakdownMismatchRow,
 } from '@/modules/warranty-provision/server/breakdown-mfg';
 
 export type WarrantyClaimRow = {

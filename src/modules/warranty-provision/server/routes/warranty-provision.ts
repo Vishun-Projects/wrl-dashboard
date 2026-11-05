@@ -14,10 +14,15 @@ import {
   queryBreakdownMfgDetail,
   queryBreakdownMfgDetailCrmW,
 } from '@/modules/warranty-provision/server/breakdown-mfg';
-import { fyStartYear, todayIsoIst } from '@/modules/warranty-provision/fy';
+import {
+  listMismatchFacts,
+  resyncMismatchFacts,
+} from '@/modules/warranty-provision/server/mismatch-facts';
+import { fyStartYear, parsePeriodYm, todayIsoIst } from '@/modules/warranty-provision/fy';
 import {
   buildClaimsTemplateWorkbook,
   buildForecastWorkbook,
+  buildMismatchWorkbook,
   buildSnapWorkbook,
   buildUnitsTemplateWorkbook,
 } from '@/modules/warranty-provision/server/excel-export';
@@ -113,6 +118,30 @@ export async function GET(req: NextRequest) {
       const periodYm = searchParams.get('periodYm') ?? searchParams.get('asOf') ?? '';
       const year = searchParams.get('year') ?? 'NA';
       return NextResponse.json(await queryBreakdownMfgDetailCrmW(periodYm, year));
+    }
+
+    if (mode === 'breakdown-mismatch' || mode === 'breakdown-mismatch-export') {
+      const periodYm = searchParams.get('periodYm') ?? searchParams.get('asOf') ?? '';
+      const onlyRaw = (searchParams.get('onlyIn') ?? '').trim();
+      const onlyIn = onlyRaw === 'wp' || onlyRaw === 'crm' ? onlyRaw : '';
+      if (mode === 'breakdown-mismatch-export') {
+        const data = await listMismatchFacts({ periodYm, onlyIn, all: true });
+        const buffer = await buildMismatchWorkbook(data);
+        const filter =
+          onlyIn === 'wp' ? '_WP' : onlyIn === 'crm' ? '_CRM' : '';
+        return new NextResponse(new Uint8Array(buffer), {
+          headers: {
+            'Content-Type':
+              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition': `attachment; filename="Warranty_Mismatch_${data.periodYm}${filter}.xlsx"`,
+          },
+        });
+      }
+      const page = Math.max(1, Number(searchParams.get('page') ?? 1) || 1);
+      const pageSize = Math.min(500, Math.max(1, Number(searchParams.get('pageSize') ?? 100) || 100));
+      return NextResponse.json(
+        await listMismatchFacts({ periodYm, onlyIn, page, pageSize })
+      );
     }
 
     if (mode === 'rates') {
@@ -308,8 +337,14 @@ export async function POST(req: NextRequest) {
       }
       const syncedBy =
         String(userAuth?.profile?.email ?? auth.userId).trim() || auth.userId;
+      const body = (await req.json().catch(() => ({}))) as { periodYm?: string };
+      const periodYm = parsePeriodYm(
+        String(body.periodYm ?? searchParams.get('periodYm') ?? '').trim() ||
+          todayIsoIst().slice(0, 7)
+      );
       const meta = await resyncClaimFacts({ syncedBy });
-      return NextResponse.json(meta);
+      const mismatch = await resyncMismatchFacts({ syncedBy, periodYm });
+      return NextResponse.json({ ...meta, mismatch });
     }
 
     return NextResponse.json({ error: 'Unknown mode' }, { status: 400 });
