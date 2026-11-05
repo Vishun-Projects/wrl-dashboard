@@ -129,17 +129,22 @@ WITH month_calls AS (
     AND NULLIF(btrim(h.vtrnno), '') IS NOT NULL
 ),
 active AS (
-  SELECT DISTINCT btrim(serial_number) AS serial,
-         MAX(warranty_end_date)::date AS warranty_end
+  SELECT btrim(serial_number) AS serial,
+         MAX(warranty_end_date)::date AS warranty_end,
+         MIN(billing_date)::date AS min_billing
   FROM warranty_provision_rows
   WHERE btrim(serial_number) ~ '${OUR_SERIAL}'
     AND warranty_end_date IS NOT NULL
+    AND billing_date IS NOT NULL
   GROUP BY 1
 ),
 wp AS (
   SELECT c.*, a.warranty_end
   FROM month_calls c
-  INNER JOIN active a ON a.serial = c.serial AND a.warranty_end > c.as_of
+  INNER JOIN active a
+    ON a.serial = c.serial
+   AND a.warranty_end > c.as_of
+   AND a.min_billing < c.as_of
 ),
 crm AS (
   SELECT c.*, NULL::date AS warranty_end

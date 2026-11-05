@@ -82,8 +82,24 @@ export type SnapBundle = {
   breakdownWco: BreakdownMfgResponse | null;
 };
 
+/** Bump when SNAP/active/breakdown payload semantics change (invalidates session cache). */
+export const SNAP_CACHE_VER = 'v3-bill-lt-asof';
+
+const VER_SS_KEY = `${SS_PREFIX}ver`;
+
+/** Drop mem + session entries when cache semantics version changes. */
+export function ensureWarrantyCacheVersion(): void {
+  try {
+    if (sessionStorage.getItem(VER_SS_KEY) === SNAP_CACHE_VER) return;
+    cacheClearWarranty();
+    sessionStorage.setItem(VER_SS_KEY, SNAP_CACHE_VER);
+  } catch {
+    cacheClearWarranty();
+  }
+}
+
 export function snapCacheKey(qs: string, asOf: string, periodYm: string): string {
-  return `snap:${qs}|active:${asOf}|bd:${periodYm}|wco`;
+  return `snap:${SNAP_CACHE_VER}:${qs}|active:${asOf}|bd:${periodYm}|wco`;
 }
 
 export function unitsCacheKey(qs: string): string {
@@ -100,11 +116,11 @@ export function claimsCacheKey(
 }
 
 export function ratesCacheKey(qs: string): string {
-  return `rates:${qs}`;
+  return `rates:${SNAP_CACHE_VER}:${qs}`;
 }
 
 export function forecastCacheKey(qs: string, scenario: string): string {
-  return `forecast:${qs}|${scenario}`;
+  return `forecast:${SNAP_CACHE_VER}:${qs}|${scenario}`;
 }
 
 export function mismatchCacheKey(
@@ -113,7 +129,7 @@ export function mismatchCacheKey(
   page: number,
   pageSize: number
 ): string {
-  return `mismatch:${periodYm}|${onlyIn || 'all'}|p:${page}|ps:${pageSize}`;
+  return `mismatch:${SNAP_CACHE_VER}:${periodYm}|${onlyIn || 'all'}|p:${page}|ps:${pageSize}`;
 }
 
 export type ClaimsCachePayload = {

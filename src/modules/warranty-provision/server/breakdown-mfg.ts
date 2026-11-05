@@ -68,7 +68,8 @@ export async function queryBreakdownMfgByYear(
   const monthStart = monthStartIso(periodYm);
   const asOf = asOfFromPeriodYm(periodYm);
 
-  return withAppClient(async (client) => {
+  return withAppClient(
+    async (client) => {
     const { rows } = await client.query<{
       year_key: string;
       machines: string;
@@ -80,6 +81,8 @@ export async function queryBreakdownMfgByYear(
         WHERE btrim(serial_number) ~ '${OUR_SERIAL}'
           AND warranty_end_date IS NOT NULL
           AND warranty_end_date > $2::date
+          AND billing_date IS NOT NULL
+          AND billing_date < $2::date
       ),
       month_bd AS (
         SELECT DISTINCT btrim(h.serial) AS serial
@@ -121,12 +124,14 @@ export async function queryBreakdownMfgByYear(
       rows: out,
       totalMachines: out.reduce((a, r) => a + r.machines, 0),
     } satisfies BreakdownMfgResponseWithBasis;
-  });
+  },
+  { statementTimeoutMs: 120_000 }
+  );
 }
 
 /**
  * Same year-wise table from calls_latest_hot only: Breakdown solved in month,
- * 14-digit serial, CRM WCO = W (under warranty as of call date).
+ * 14-digit serial, CRM WCO = W. (Hot-only — do not join WP; that timed out.)
  */
 export async function queryBreakdownMfgByYearCrmW(
   periodYmRaw: string
@@ -230,6 +235,8 @@ export async function queryBreakdownMfgDetail(
         WHERE btrim(serial_number) ~ '${OUR_SERIAL}'
           AND warranty_end_date IS NOT NULL
           AND warranty_end_date > $2::date
+          AND billing_date IS NOT NULL
+          AND billing_date < $2::date
           AND substring(btrim(serial_number) FROM 6 FOR 2) = $3
       )
       SELECT

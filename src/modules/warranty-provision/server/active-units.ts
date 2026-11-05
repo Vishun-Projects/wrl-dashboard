@@ -43,6 +43,8 @@ export async function queryActiveUnitsByYear(asOfRaw: string): Promise<ActiveUni
         FROM warranty_provision_rows
         WHERE warranty_end_date IS NOT NULL
           AND warranty_end_date > $1::date
+          AND billing_date IS NOT NULL
+          AND billing_date < $1::date
       ),
       mfg AS (
         SELECT mfg_y AS year, COUNT(*)::bigint AS qty

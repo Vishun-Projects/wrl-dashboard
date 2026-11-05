@@ -30,6 +30,7 @@ import {
   cacheGet,
   cacheSet,
   claimsCacheKey,
+  ensureWarrantyCacheVersion,
   forecastCacheKey,
   mismatchCacheKey,
   ratesCacheKey,
@@ -272,6 +273,7 @@ export default function WarrantyProvisionPageClient() {
   }, [asOf, fyFrom, fyCount]);
 
   useEffect(() => {
+    ensureWarrantyCacheVersion();
     void (async () => {
       const cached = cacheGet<WarrantyProvisionOptions>('options');
       if (cached) setOptions(cached);
@@ -291,59 +293,72 @@ export default function WarrantyProvisionPageClient() {
     const key = snapCacheKey(snapQs.toString(), asOf, periodYm);
     const cached = cacheGet<SnapBundle>(key);
     setLoadingLabel('Loading SNAP / breakdown…');
+    // Never paint stale bundle while a slow sibling request runs — always refetch.
+    setLoading(true);
     if (cached) {
       setSnap(cached.snap);
       setActiveUnits(cached.active);
       setBreakdownMfg(cached.breakdown);
       setBreakdownWco(cached.breakdownWco);
-      setLoading(false);
-    } else {
-      setLoading(true);
     }
     try {
-      const [snapRes, activeRes, bdRes, wcoRes] = await Promise.all([
-        fetch(`${API}?mode=snap&${snapQs}`, { credentials: 'include' }),
-        fetch(`${API}?mode=active-units&asOf=${encodeURIComponent(asOf)}`, {
-          credentials: 'include',
-        }),
-        fetch(`${API}?mode=breakdown-mfg&periodYm=${encodeURIComponent(periodYm)}`, {
-          credentials: 'include',
-        }),
-        fetch(`${API}?mode=breakdown-mfg-wco&periodYm=${encodeURIComponent(periodYm)}`, {
-          credentials: 'include',
-        }),
+      const snapP = fetch(`${API}?mode=snap&${snapQs}`, { credentials: 'include' }).then(
+        async (res) => {
+          if (!res.ok) throw new Error('SNAP load failed');
+          const data = (await res.json()) as SnapResponse;
+          setSnap(data);
+          return data;
+        }
+      );
+      const activeP = fetch(
+        `${API}?mode=active-units&asOf=${encodeURIComponent(asOf)}`,
+        { credentials: 'include' }
+      ).then(async (res) => {
+        const data = res.ok ? ((await res.json()) as ActiveUnitsResponse) : null;
+        setActiveUnits(data);
+        return data;
+      });
+      const bdP = fetch(
+        `${API}?mode=breakdown-mfg&periodYm=${encodeURIComponent(periodYm)}`,
+        { credentials: 'include' }
+      ).then(async (res) => {
+        if (!res.ok) {
+          const errBody = (await res.json().catch(() => null)) as { error?: string } | null;
+          feedback.actionFailed(errBody?.error || `Breakdown report failed (${res.status})`);
+          setBreakdownMfg(null);
+          return null;
+        }
+        const data = (await res.json()) as BreakdownMfgResponse;
+        setBreakdownMfg(data);
+        return data;
+      });
+      const wcoP = fetch(
+        `${API}?mode=breakdown-mfg-wco&periodYm=${encodeURIComponent(periodYm)}`,
+        { credentials: 'include' }
+      ).then(async (res) => {
+        if (!res.ok) {
+          const errBody = (await res.json().catch(() => null)) as { error?: string } | null;
+          feedback.actionFailed(errBody?.error || `CRM WCO report failed (${res.status})`);
+          setBreakdownWco(null);
+          return null;
+        }
+        const data = (await res.json()) as BreakdownMfgResponse;
+        setBreakdownWco(data);
+        return data;
+      });
+
+      const [snapData, activeData, bdData, wcoData] = await Promise.all([
+        snapP,
+        activeP,
+        bdP,
+        wcoP,
       ]);
-      if (!snapRes.ok) throw new Error('SNAP load failed');
-      const snapData = (await snapRes.json()) as SnapResponse;
-      const activeData = activeRes.ok
-        ? ((await activeRes.json()) as ActiveUnitsResponse)
-        : null;
-      let bdData: BreakdownMfgResponse | null = null;
-      if (bdRes.ok) {
-        bdData = (await bdRes.json()) as BreakdownMfgResponse;
-      } else {
-        const errBody = (await bdRes.json().catch(() => null)) as { error?: string } | null;
-        feedback.actionFailed(errBody?.error || `Breakdown report failed (${bdRes.status})`);
-      }
-      let wcoData: BreakdownMfgResponse | null = null;
-      if (wcoRes.ok) {
-        wcoData = (await wcoRes.json()) as BreakdownMfgResponse;
-      } else {
-        const errBody = (await wcoRes.json().catch(() => null)) as { error?: string } | null;
-        feedback.actionFailed(errBody?.error || `CRM WCO report failed (${wcoRes.status})`);
-      }
-      setSnap(snapData);
-      setActiveUnits(activeData);
-      setBreakdownMfg(bdData);
-      setBreakdownWco(wcoData);
-      if (bdData && wcoData) {
-        cacheSet(key, {
-          snap: snapData,
-          active: activeData,
-          breakdown: bdData,
-          breakdownWco: wcoData,
-        });
-      }
+      cacheSet(key, {
+        snap: snapData,
+        active: activeData,
+        breakdown: bdData,
+        breakdownWco: wcoData,
+      });
     } catch (e) {
       if (!cached) feedback.actionFailed(e instanceof Error ? e.message : 'SNAP failed');
     } finally {
