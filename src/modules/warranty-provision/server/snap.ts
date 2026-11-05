@@ -66,6 +66,8 @@ export async function querySnapReport(q: SnapQuery): Promise<SnapResponse> {
       `);
     }
 
+    // Period as-of is 1st of next month; billing_date < asOf = on/before selected month-end
+    // (Excel "active as on 30.09.2026" must not include October billings).
     const { rows } = await client.query(
       `
       SELECT
@@ -74,6 +76,7 @@ export async function querySnapReport(q: SnapQuery): Promise<SnapResponse> {
         ${exprs.join(',\n')}
       FROM warranty_provision_rows
       WHERE billing_date IS NOT NULL
+        AND billing_date < $1::date
       GROUP BY COALESCE(billing_year, 0)
       ORDER BY 1
       `,
@@ -148,6 +151,7 @@ export async function snapExposureUnitYears(q: SnapQuery): Promise<number> {
       SELECT (${exprs.join(' + ')})::float8 AS grand
       FROM warranty_provision_rows
       WHERE billing_date IS NOT NULL
+        AND billing_date < $1::date
       `,
       params
     );
