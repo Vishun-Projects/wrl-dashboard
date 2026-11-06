@@ -4,6 +4,15 @@ import { getAssumptions } from '@/modules/warranty-provision/server/claims';
 import { claimFactRateStats } from '@/modules/warranty-provision/server/claim-facts';
 import type { WarrantyRatesResponse } from '@/modules/warranty-provision/types';
 
+const AGE_BAND_ORDER: Record<string, number> = {
+  '0-6m': 0,
+  '6-12m': 1,
+  '12-24m': 2,
+  '24-36m': 3,
+  '36m+': 4,
+  unknown: 5,
+};
+
 export async function queryWarrantyRates(q: SnapQuery): Promise<WarrantyRatesResponse> {
   const asOf = parseAsOf(q.asOf);
   const exposureUnitYears = await snapExposureUnitYears({ ...q, asOf });
@@ -93,16 +102,22 @@ export async function queryWarrantyRates(q: SnapQuery): Promise<WarrantyRatesRes
           flagged: thin,
         };
       }),
-      byAgeBand: byAgeExposed.rows.map((r) => {
-        const exposed = Number(r.exposed) || 0;
-        const claims = claimByBand.get(r.band) ?? 0;
-        return {
-          band: r.band,
-          exposed,
-          claims,
-          hazard: exposed > 0 ? claims / exposed : null,
-        };
-      }),
+      byAgeBand: byAgeExposed.rows
+        .map((r) => {
+          const exposed = Number(r.exposed) || 0;
+          const claims = claimByBand.get(r.band) ?? 0;
+          return {
+            band: r.band,
+            exposed,
+            claims,
+            hazard: exposed > 0 ? claims / exposed : null,
+          };
+        })
+        // ORDER BY band is alphabetical (6-12m after 36m+); keep chronological.
+        .sort(
+          (a, b) =>
+            (AGE_BAND_ORDER[a.band] ?? 99) - (AGE_BAND_ORDER[b.band] ?? 99),
+        ),
       assumptionBadge: assumptions.usingDefaults
         ? 'Default assumptions in use'
         : 'Saved assumptions in use',

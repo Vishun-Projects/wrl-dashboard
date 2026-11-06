@@ -86,7 +86,7 @@ export type SnapBundle = {
 };
 
 /** Bump when SNAP/active/breakdown payload semantics change (invalidates session cache). */
-export const SNAP_CACHE_VER = 'v8-claims-by-mg-basis';
+export const SNAP_CACHE_VER = 'v9-age-band-order';
 
 const VER_SS_KEY = `${SS_PREFIX}ver`;
 

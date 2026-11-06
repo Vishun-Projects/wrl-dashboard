@@ -156,8 +156,11 @@ export async function buildClaimsByMgWorkbook(
     'Traveling reimbursement',
     'Spare parts',
     'Total',
+    'Cost per unit',
   ]);
   ws.getRow(1).font = { bold: true };
+  const costPerUnit = (total: number, calls: number) =>
+    calls > 0 ? total / calls : null;
   for (const r of data.rows) {
     ws.addRow([
       r.materialGroup,
@@ -169,6 +172,7 @@ export async function buildClaimsByMgWorkbook(
       r.travelingReimbursement,
       r.sparePartsCost,
       r.totalCost,
+      costPerUnit(r.totalCost, r.callCount),
     ]);
   }
   const tot = ws.addRow([
@@ -181,6 +185,7 @@ export async function buildClaimsByMgWorkbook(
     data.totals.travelingReimbursement,
     data.totals.sparePartsCost,
     data.totals.totalCost,
+    costPerUnit(data.totals.totalCost, data.totals.callCount),
   ]);
   tot.font = { bold: true };
   ws.eachRow((row, ri) => {
@@ -188,7 +193,7 @@ export async function buildClaimsByMgWorkbook(
     for (const i of [2, 3, 4, 5]) {
       row.getCell(i).numFmt = '#,##,##0';
     }
-    for (const i of [6, 7, 8, 9]) {
+    for (const i of [6, 7, 8, 9, 10]) {
       row.getCell(i).numFmt = '#,##,##0.00';
     }
   });
@@ -202,6 +207,7 @@ export async function buildClaimsByMgWorkbook(
     { width: 14 },
     { width: 12 },
     { width: 12 },
+    { width: 13 },
   ];
   const notes = wb.addWorksheet('Notes');
   notes.addRow(['Item', 'Value']);
