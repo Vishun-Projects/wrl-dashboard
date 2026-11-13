@@ -97,7 +97,7 @@ const MONTH_OPTS = [
 ] as const;
 
 const SELECT_CLS =
-  'h-9 rounded-md border border-slate-200 bg-white px-2 text-[14px] font-medium text-slate-900';
+  'h-8 rounded-md border border-slate-200 bg-white px-2 text-[12px] font-medium text-slate-900';
 
 function yearOptsAround(periodYm: string): number[] {
   const cur = Number(periodYm.slice(0, 4)) || Number(prevPeriodYmIst().slice(0, 4));
@@ -205,7 +205,8 @@ function costPerUnit(total: number, callCount: number): number | null {
 }
 
 const WP_TABULAR =
-  'w-full border-collapse text-[16px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2.5 [&_th]:text-[14px] [&_th]:font-semibold [&_th]:text-slate-900 [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:text-[16px] [&_td]:text-slate-900 [&_tr]:border-0';
+  'w-full border-collapse text-[12px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:text-slate-900 [&_td]:border [&_td]:border-slate-300 [&_td]:px-2 [&_td]:py-1 [&_td]:text-[12px] [&_td]:text-slate-900 [&_tr]:border-0';
+
 
 export default function WarrantyProvisionPageClient() {
   const { userProfile } = useUser();
@@ -904,7 +905,7 @@ export default function WarrantyProvisionPageClient() {
           e.stopPropagation();
           void copyTableRoot(gridRef.current);
         }}
-        className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[13px] font-medium text-slate-900 hover:bg-slate-50"
+        className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] font-medium text-slate-900 hover:bg-slate-50"
       >
         <Copy className="h-3.5 w-3.5" />
         Copy
@@ -1168,16 +1169,12 @@ export default function WarrantyProvisionPageClient() {
 
   return (
     <PageShell
-      title={
-        <span className="block text-[18px] font-semibold leading-tight text-slate-900">
-          Warranty Provision
-        </span>
-      }
-      subtitle={undefined}
+      title="Warranty Provision"
+      subtitle="SNAP coverage · units · claim rates · cost forecast"
       icon={<Shield className="h-4 w-4" />}
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap items-center gap-1.5 text-[14px] font-medium text-slate-900">
+          <div className="flex flex-wrap items-center gap-1.5 text-[12px] font-medium text-slate-900">
             <span>Period</span>
             <select
               aria-label="Month"
@@ -1213,32 +1210,130 @@ export default function WarrantyProvisionPageClient() {
                 </option>
               ))}
             </select>
-            <span className="text-[13px] font-medium text-slate-800">
+            <span className="text-[12px] font-medium text-slate-800">
               as-of {formatUiDate(asOf)}
             </span>
           </div>
         </div>
       }
       toolbar={
-        <div className="border-b border-slate-200 bg-bg-canvas px-3 py-2">
-          <p className="mb-1.5 text-[13px] font-medium text-slate-800">
-            SNAP coverage · units · claim rates · cost forecast
-          </p>
-          <div className="flex flex-wrap gap-1">
-            {tabs.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTab(t.id)}
-                className={`rounded-md px-3 py-1.5 text-[14px] font-semibold ${
-                  tab === t.id
-                    ? 'bg-slate-900 text-white'
-                    : 'text-slate-800 hover:bg-slate-100'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
+        <div className="border-b border-slate-200 bg-bg-canvas px-3 py-1.5">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <div className="flex flex-wrap gap-1">
+              {tabs.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTab(t.id)}
+                  className={`rounded-md px-2.5 py-1 text-[12px] font-semibold ${
+                    tab === t.id
+                      ? 'bg-slate-900 text-white'
+                      : 'text-slate-800 hover:bg-slate-100'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {tab === 'snap' ? (
+              <div className="ml-auto flex min-w-0 flex-wrap items-center gap-2">
+                <label className="inline-flex items-center gap-1 text-[11px] text-slate-900">
+                  First FY
+                  <input
+                    type="number"
+                    value={fyFrom}
+                    onChange={(e) => setFyFrom(Number(e.target.value) || fyFrom)}
+                    className="h-7 w-16 rounded border border-slate-200 px-1.5 text-[11px]"
+                    aria-label="First FY (start year)"
+                  />
+                </label>
+                <label className="inline-flex items-center gap-1 text-[11px] text-slate-900">
+                  FY cols
+                  <input
+                    type="number"
+                    min={1}
+                    max={15}
+                    value={fyCount}
+                    onChange={(e) =>
+                      setFyCount(Math.min(15, Math.max(1, Number(e.target.value) || 6)))
+                    }
+                    className="h-7 w-12 rounded border border-slate-200 px-1.5 text-[11px]"
+                    aria-label="FY columns"
+                  />
+                </label>
+                <div className="relative" ref={snapExportMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setSnapExportMenuOpen((o) => !o)}
+                    disabled={exporting}
+                    className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] disabled:opacity-50"
+                    aria-haspopup="menu"
+                    aria-expanded={snapExportMenuOpen}
+                  >
+                    <Download className={`h-3.5 w-3.5 ${exporting ? 'animate-pulse' : ''}`} />
+                    {exporting ? 'Preparing…' : 'Download Excel'}
+                  </button>
+                  {snapExportMenuOpen ? (
+                    <div
+                      role="menu"
+                      className="absolute right-0 top-full z-30 mt-1 w-72 rounded-md border border-slate-200 bg-white py-1 shadow-lg"
+                    >
+                      {(
+                        [
+                          {
+                            kind: 'snap' as const,
+                            title: 'SNAP coverage',
+                            hint: 'Matrix on screen (billing year × FY)',
+                          },
+                          {
+                            kind: 'active' as const,
+                            title: 'Active units by year',
+                            hint: 'Mfg / billing year totals on screen',
+                          },
+                          {
+                            kind: 'bd-wp' as const,
+                            title: 'Breakdown · Active WP — call dump',
+                            hint: 'All solved Breakdown calls that feed the year table',
+                          },
+                          {
+                            kind: 'bd-crm' as const,
+                            title: 'Breakdown · CRM WCO=W — call dump',
+                            hint: 'All WCO=W solved Breakdown calls for the period',
+                          },
+                          {
+                            kind: 'claims-mg' as const,
+                            title: 'Claims by material group',
+                            hint: 'Unique units, major/minor, costs for the period',
+                          },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.kind}
+                          type="button"
+                          role="menuitem"
+                          className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-slate-50"
+                          onClick={() => void downloadSnapReport(opt.kind)}
+                        >
+                          <span className="text-[11px] font-medium text-slate-800">
+                            {opt.title}
+                          </span>
+                          <span className="text-[11px] leading-snug text-slate-900">
+                            {opt.hint}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <span className="text-[11px] text-slate-900">
+                  {loading
+                    ? 'Loading…'
+                    : snap
+                      ? `${inr(snap.totalUnits)} units · exposure ${inr(snap.grandTotal)} unit-years`
+                      : ''}
+                </span>
+              </div>
+            ) : null}
           </div>
         </div>
       }
@@ -1248,7 +1343,7 @@ export default function WarrantyProvisionPageClient() {
           <div
             role="status"
             aria-live="polite"
-            className="flex shrink-0 items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-[14px] text-sky-900"
+            className="flex shrink-0 items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-900"
           >
             <span
               className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-sky-400 border-t-transparent"
@@ -1260,99 +1355,6 @@ export default function WarrantyProvisionPageClient() {
         ) : null}
         {tab === 'snap' && (
           <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
-            <div className="flex shrink-0 flex-wrap items-end gap-2 px-1">
-              <label className="text-[13px] text-slate-900">
-                First FY (start year)
-                <input
-                  type="number"
-                  value={fyFrom}
-                  onChange={(e) => setFyFrom(Number(e.target.value) || fyFrom)}
-                  className="ml-1 h-8 w-20 rounded border border-slate-200 px-2 text-[14px]"
-                />
-              </label>
-              <label className="text-[13px] text-slate-900">
-                FY columns
-                <input
-                  type="number"
-                  min={1}
-                  max={15}
-                  value={fyCount}
-                  onChange={(e) => setFyCount(Math.min(15, Math.max(1, Number(e.target.value) || 6)))}
-                  className="ml-1 h-8 w-16 rounded border border-slate-200 px-2 text-[14px]"
-                />
-              </label>
-              <div className="relative" ref={snapExportMenuRef}>
-                <button
-                  type="button"
-                  onClick={() => setSnapExportMenuOpen((o) => !o)}
-                  disabled={exporting}
-                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[14px] disabled:opacity-50"
-                  aria-haspopup="menu"
-                  aria-expanded={snapExportMenuOpen}
-                >
-                  <Download className={`h-3.5 w-3.5 ${exporting ? 'animate-pulse' : ''}`} />
-                  {exporting ? 'Preparing…' : 'Download Excel'}
-                </button>
-                {snapExportMenuOpen ? (
-                  <div
-                    role="menu"
-                    className="absolute left-0 top-full z-30 mt-1 w-72 rounded-md border border-slate-200 bg-white py-1 shadow-lg"
-                  >
-                    {(
-                      [
-                        {
-                          kind: 'snap' as const,
-                          title: 'SNAP coverage',
-                          hint: 'Matrix on screen (billing year × FY)',
-                        },
-                        {
-                          kind: 'active' as const,
-                          title: 'Active units by year',
-                          hint: 'Mfg / billing year totals on screen',
-                        },
-                        {
-                          kind: 'bd-wp' as const,
-                          title: 'Breakdown · Active WP — call dump',
-                          hint: 'All solved Breakdown calls that feed the year table',
-                        },
-                        {
-                          kind: 'bd-crm' as const,
-                          title: 'Breakdown · CRM WCO=W — call dump',
-                          hint: 'All WCO=W solved Breakdown calls for the period',
-                        },
-                        {
-                          kind: 'claims-mg' as const,
-                          title: 'Claims by material group',
-                          hint: 'Unique units, major/minor, costs for the period',
-                        },
-                      ] as const
-                    ).map((opt) => (
-                      <button
-                        key={opt.kind}
-                        type="button"
-                        role="menuitem"
-                        className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left hover:bg-slate-50"
-                        onClick={() => void downloadSnapReport(opt.kind)}
-                      >
-                        <span className="text-[14px] font-medium text-slate-800">
-                          {opt.title}
-                        </span>
-                        <span className="text-[13px] leading-snug text-slate-900">
-                          {opt.hint}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-              <span className="ml-auto text-[14px] text-slate-900">
-                {loading
-                  ? 'Loading…'
-                  : snap
-                    ? `${inr(snap.totalUnits)} units · exposure ${inr(snap.grandTotal)} unit-years`
-                    : ''}
-              </span>
-            </div>
             <div className="flex min-h-0 w-full flex-1 flex-col gap-2 overflow-hidden">
             <div className="flex min-h-0 w-full flex-[3] items-stretch gap-3 overflow-x-auto overflow-y-hidden custom-scrollbar">
               <div
@@ -1361,13 +1363,13 @@ export default function WarrantyProvisionPageClient() {
                 {...gridSelectHandlers('snap')}
               >
                 <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 px-3 py-2">
-                  <div className="min-w-0 text-[15px] font-semibold text-slate-900">
+                  <div className="min-w-0 text-[12px] font-semibold text-slate-900">
                     SNAP coverage
                   </div>
                   {copyTableBtn(snapGridRef)}
                 </div>
                 <div className="min-h-0 flex-1 overflow-auto custom-scrollbar">
-                  <AdminTable className="w-full border-collapse text-[16px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2.5 [&_th]:text-[14px] [&_th]:font-semibold [&_th]:text-slate-900 [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:text-[16px] [&_td]:text-slate-900 [&_tr]:border-0">
+                  <AdminTable className="w-full border-collapse text-[12px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:text-slate-900 [&_td]:border [&_td]:border-slate-300 [&_td]:px-2 [&_td]:py-1 [&_td]:text-[12px] [&_td]:text-slate-900 [&_tr]:border-0">
                     <AdminThead>
                       <tr>
                         <AdminTh>Billing year</AdminTh>
@@ -1442,17 +1444,17 @@ export default function WarrantyProvisionPageClient() {
               >
                 <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200 px-3 py-2">
                   <div className="min-w-0">
-                    <div className="text-[15px] font-semibold text-slate-900">
+                    <div className="text-[12px] font-semibold text-slate-900">
                       Active units by year
                     </div>
-                    <div className="mt-0.5 text-[13px] leading-snug text-slate-800">
+                    <div className="mt-0.5 text-[11px] leading-snug text-slate-800">
                       Active = end &gt; as-of · Mfg = LEN(serial)=14 → MID+2000 else billing year
                     </div>
                   </div>
                   {copyTableBtn(activeGridRef)}
                 </div>
                 <div className="min-h-0 flex-1 overflow-auto custom-scrollbar">
-                  <AdminTable className="w-full border-collapse text-[16px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2.5 [&_th]:text-[14px] [&_th]:font-semibold [&_th]:text-slate-900 [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:text-[16px] [&_td]:text-slate-900 [&_tr]:border-0">
+                  <AdminTable className="w-full border-collapse text-[12px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:text-slate-900 [&_td]:border [&_td]:border-slate-300 [&_td]:px-2 [&_td]:py-1 [&_td]:text-[12px] [&_td]:text-slate-900 [&_tr]:border-0">
                     <AdminThead>
                       <tr>
                         <AdminTh>Year</AdminTh>
@@ -1522,23 +1524,23 @@ export default function WarrantyProvisionPageClient() {
                 <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200 px-3 py-2">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <div className="text-[15px] font-semibold text-slate-900">
+                      <div className="text-[12px] font-semibold text-slate-900">
                         Breakdown solved · machines by mfg year
                       </div>
                       {claimsByMgBasis === 'wp-active' ? (
-                        <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[13px] font-semibold text-sky-950">
+                        <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-sky-950">
                           Claims by Material Group source
                         </span>
                       ) : null}
                     </div>
-                    <div className="mt-0.5 text-[13px] leading-snug text-slate-800">
+                    <div className="mt-0.5 text-[11px] leading-snug text-slate-800">
                       14-digit · Active WP · click year / Major / Minor for calls
                     </div>
                   </div>
                   {copyTableBtn(breakdownGridRef)}
                 </div>
                 <div className="min-h-0 flex-1 overflow-auto custom-scrollbar">
-                  <AdminTable className="w-full border-collapse text-[16px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2.5 [&_th]:text-[14px] [&_th]:font-semibold [&_th]:text-slate-900 [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:text-[16px] [&_td]:text-slate-900 [&_tr]:border-0">
+                  <AdminTable className="w-full border-collapse text-[12px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:text-slate-900 [&_td]:border [&_td]:border-slate-300 [&_td]:px-2 [&_td]:py-1 [&_td]:text-[12px] [&_td]:text-slate-900 [&_tr]:border-0">
                     <AdminThead>
                       <tr>
                         <AdminTh>Mfg year</AdminTh>
@@ -1647,23 +1649,23 @@ export default function WarrantyProvisionPageClient() {
                 <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200 px-3 py-2">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <div className="text-[15px] font-semibold text-slate-900">
+                      <div className="text-[12px] font-semibold text-slate-900">
                         Breakdown solved · CRM WCO=W · by mfg year
                       </div>
                       {claimsByMgBasis === 'crm-w' ? (
-                        <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[13px] font-semibold text-sky-950">
+                        <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-sky-950">
                           Claims by Material Group source
                         </span>
                       ) : null}
                     </div>
-                    <div className="mt-0.5 text-[13px] leading-snug text-slate-800">
+                    <div className="mt-0.5 text-[11px] leading-snug text-slate-800">
                       hot · WCO=W · 14-digit · click year / Major / Minor for calls
                     </div>
                   </div>
                   {copyTableBtn(breakdownWcoGridRef)}
                 </div>
                 <div className="min-h-0 flex-1 overflow-auto custom-scrollbar">
-                  <AdminTable className="w-full border-collapse text-[16px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2.5 [&_th]:text-[14px] [&_th]:font-semibold [&_th]:text-slate-900 [&_td]:border [&_td]:border-slate-300 [&_td]:px-3 [&_td]:py-2 [&_td]:text-[16px] [&_td]:text-slate-900 [&_tr]:border-0">
+                  <AdminTable className="w-full border-collapse text-[12px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:text-slate-900 [&_td]:border [&_td]:border-slate-300 [&_td]:px-2 [&_td]:py-1 [&_td]:text-[12px] [&_td]:text-slate-900 [&_tr]:border-0">
                     <AdminThead>
                       <tr>
                         <AdminTh>Mfg year</AdminTh>
@@ -1768,10 +1770,10 @@ export default function WarrantyProvisionPageClient() {
               >
                 <div className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-200 px-3 py-2">
                   <div className="min-w-0 flex-1">
-                    <div className="text-[15px] font-semibold text-slate-900">
+                    <div className="text-[12px] font-semibold text-slate-900">
                       Claims by material group
                     </div>
-                    <div className="mt-0.5 text-[13px] leading-snug text-slate-800">
+                    <div className="mt-0.5 text-[11px] leading-snug text-slate-800">
                       {periodYm} · call set from{' '}
                       {claimsByMgBasis === 'crm-w'
                         ? 'Breakdown · CRM WCO=W'
@@ -1810,7 +1812,7 @@ export default function WarrantyProvisionPageClient() {
                         role="radio"
                         aria-checked={claimsByMgBasis === 'wp-active'}
                         onClick={() => setClaimsByMgBasis('wp-active')}
-                        className={`relative z-10 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors ${
+                        className={`relative z-10 rounded-md px-2.5 py-1.5 text-left text-[11px] transition-colors ${
                           claimsByMgBasis === 'wp-active'
                             ? 'font-semibold text-slate-900'
                             : 'font-medium text-slate-700 hover:text-slate-900'
@@ -1818,7 +1820,7 @@ export default function WarrantyProvisionPageClient() {
                       >
                         <span className="block leading-tight">Machines by mfg year</span>
                         <span
-                          className={`mt-0.5 block text-[13px] font-normal ${
+                          className={`mt-0.5 block text-[11px] font-normal ${
                             claimsByMgBasis === 'wp-active'
                               ? 'text-slate-800'
                               : 'text-slate-700'
@@ -1835,7 +1837,7 @@ export default function WarrantyProvisionPageClient() {
                         role="radio"
                         aria-checked={claimsByMgBasis === 'crm-w'}
                         onClick={() => setClaimsByMgBasis('crm-w')}
-                        className={`relative z-10 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors ${
+                        className={`relative z-10 rounded-md px-2.5 py-1.5 text-left text-[11px] transition-colors ${
                           claimsByMgBasis === 'crm-w'
                             ? 'font-semibold text-slate-900'
                             : 'font-medium text-slate-700 hover:text-slate-900'
@@ -1843,7 +1845,7 @@ export default function WarrantyProvisionPageClient() {
                       >
                         <span className="block leading-tight">CRM WCO=W by mfg year</span>
                         <span
-                          className={`mt-0.5 block text-[13px] font-normal ${
+                          className={`mt-0.5 block text-[11px] font-normal ${
                             claimsByMgBasis === 'crm-w'
                               ? 'text-slate-800'
                               : 'text-slate-700'
@@ -1863,7 +1865,7 @@ export default function WarrantyProvisionPageClient() {
                   key={claimsByMgBasis}
                   className="min-h-0 flex-1 overflow-auto custom-scrollbar"
                 >
-                  <AdminTable className="w-full border-collapse text-[15px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-2.5 [&_th]:py-2 [&_th]:text-[14px] [&_th]:font-semibold [&_th]:text-slate-900 [&_td]:border [&_td]:border-slate-300 [&_td]:px-2.5 [&_td]:py-1.5 [&_td]:text-[15px] [&_td]:text-slate-900 [&_tr]:border-0">
+                  <AdminTable className="w-full border-collapse text-[12px] [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:text-slate-900 [&_td]:border [&_td]:border-slate-300 [&_td]:px-2 [&_td]:py-1 [&_td]:text-[12px] [&_td]:text-slate-900 [&_tr]:border-0">
                     <AdminThead>
                       <tr>
                         <AdminTh>Material group</AdminTh>
@@ -2104,7 +2106,7 @@ export default function WarrantyProvisionPageClient() {
                               ? ' · Minor only'
                               : ''}
                         </h2>
-                        <p className="mt-1 text-[13px] text-slate-900">
+                        <p className="mt-1 text-[11px] text-slate-900">
                           14-digit serials · year = 2000 + digits at positions 6–7
                           {bdDetailBasis === 'crm-w'
                             ? ' · filtered by calls_latest_hot.wco = W'
@@ -2116,7 +2118,7 @@ export default function WarrantyProvisionPageClient() {
                           type="button"
                           onClick={() => void downloadBreakdownDetail()}
                           disabled={bdDetailLoading || exporting || bdDetailTotal <= 0}
-                          className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[14px] disabled:opacity-50"
+                          className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] disabled:opacity-50"
                         >
                           <Download
                             className={`h-3.5 w-3.5 ${exporting ? 'animate-pulse' : ''}`}
@@ -2139,11 +2141,11 @@ export default function WarrantyProvisionPageClient() {
                     </div>
                     <div className="min-h-0 flex-1 overflow-auto custom-scrollbar px-2 py-2">
                       {bdDetailLoading ? (
-                        <div className="px-2 py-6 text-center text-[14px] text-slate-900">
+                        <div className="px-2 py-6 text-center text-[11px] text-slate-900">
                           Loading…
                         </div>
                       ) : (
-                        <AdminTable className="min-w-full border-collapse text-[14px] [&_th]:border [&_th]:border-slate-200 [&_th]:bg-slate-50 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-[13px] [&_th]:font-semibold [&_th]:text-slate-900 [&_td]:border [&_td]:border-slate-200 [&_td]:px-2 [&_td]:py-1 [&_td]:text-[14px] [&_td]:text-slate-900">
+                        <AdminTable className="min-w-full border-collapse text-[12px] [&_th]:border [&_th]:border-slate-200 [&_th]:bg-slate-50 [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-[11px] [&_th]:font-semibold [&_th]:text-slate-900 [&_td]:border [&_td]:border-slate-200 [&_td]:px-2 [&_td]:py-1 [&_td]:text-[12px] [&_td]:text-slate-900">
                           <AdminThead>
                             <tr>
                               <AdminTh>Serial</AdminTh>
@@ -2158,7 +2160,7 @@ export default function WarrantyProvisionPageClient() {
                           <tbody>
                             {(bdDetail?.rows ?? []).map((r, i) => (
                               <AdminTr key={`${r.trn}-${r.serial}-${i}`}>
-                                <AdminTd className="font-mono text-[13px]">{r.serial}</AdminTd>
+                                <AdminTd className="font-mono text-[11px]">{r.serial}</AdminTd>
                                 <AdminTd className="font-mono">{r.yy}</AdminTd>
                                 <AdminTd>{r.trn || '—'}</AdminTd>
                                 <AdminTd>{r.partyName || '—'}</AdminTd>
@@ -2173,13 +2175,13 @@ export default function WarrantyProvisionPageClient() {
                         </AdminTable>
                       )}
                     </div>
-                    <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-slate-200 px-4 py-2 text-[13px] text-slate-900">
+                    <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-slate-200 px-4 py-2 text-[11px] text-slate-900">
                       {bdDetailLoading ? null : bdDetail ? (
                         <>
                           <span>
                             {bdDetailTotal.toLocaleString('en-IN')} call(s)
                           </span>
-                          <label className="text-[13px] text-slate-900">
+                          <label className="text-[11px] text-slate-900">
                             Rows
                             <select
                               value={bdDetailPageSize}
@@ -2189,7 +2191,7 @@ export default function WarrantyProvisionPageClient() {
                                   Number(e.target.value) as (typeof BD_DETAIL_PAGE_SIZES)[number]
                                 );
                               }}
-                              className="ml-1 h-7 rounded border border-slate-200 px-1.5 text-[13px]"
+                              className="ml-1 h-7 rounded border border-slate-200 px-1.5 text-[11px]"
                               disabled={bdDetailLoading}
                             >
                               {BD_DETAIL_PAGE_SIZES.map((n) => (
@@ -2236,12 +2238,12 @@ export default function WarrantyProvisionPageClient() {
               <button
                 type="button"
                 onClick={() => void downloadUnitsTemplate()}
-                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[14px]"
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[11px]"
               >
                 <Download className="h-3.5 w-3.5" />
                 Download template
               </button>
-              <label className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[14px]">
+              <label className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[11px]">
                 <Upload className="h-3.5 w-3.5" />
                 Import units .xlsx
                 <input
@@ -2251,8 +2253,8 @@ export default function WarrantyProvisionPageClient() {
                   onChange={(e) => void onUnitsFile(e.target.files?.[0] ?? null)}
                 />
               </label>
-              <span className="text-[14px] text-slate-900">{unitsImportStatus}</span>
-              <span className="text-[13px] text-slate-900">
+              <span className="text-[11px] text-slate-900">{unitsImportStatus}</span>
+              <span className="text-[11px] text-slate-900">
                 Upserts on Billing Document + Serial · End/FY computed · .xlsx only
               </span>
             </div>
@@ -2358,9 +2360,9 @@ export default function WarrantyProvisionPageClient() {
                   setQ(e.target.value);
                 }}
                 placeholder="Search…"
-                className="h-8 w-44 rounded border border-slate-200 px-2 text-[14px]"
+                className="h-8 w-44 rounded border border-slate-200 px-2 text-[11px]"
               />
-              <span className="ml-auto flex items-center gap-2 text-[14px] text-slate-900">
+              <span className="ml-auto flex items-center gap-2 text-[11px] text-slate-900">
                 {loading ? 'Loading…' : `${total.toLocaleString('en-IN')} row(s)`}
                 {copyTableBtn(unitsGridRef)}
               </span>
@@ -2370,7 +2372,7 @@ export default function WarrantyProvisionPageClient() {
               className="wp-copy-grid min-h-0 flex-1 overflow-auto rounded-xl border border-slate-200 bg-bg-canvas custom-scrollbar"
               {...gridSelectHandlers('units')}
             >
-              <AdminTable className="w-full min-w-max text-[15px] [&_th]:text-[14px] [&_th]:text-slate-900 [&_td]:text-[15px] [&_td]:text-slate-900">
+              <AdminTable className="w-full min-w-max text-[12px] [&_th]:text-[11px] [&_th]:text-slate-900 [&_td]:text-[12px] [&_td]:text-slate-900">
                 <AdminThead>
                   <tr>
                     <AdminTh>Billing Document</AdminTh>
@@ -2389,7 +2391,7 @@ export default function WarrantyProvisionPageClient() {
                   {rows.map((r, ri) => (
                     <AdminTr key={r.id} data-row-index={ri}>
                       <AdminTd
-                        className={`font-mono text-[13px] ${cellSelected('units', ri, 0) ? CELL_SEL_CLS : ''}`}
+                        className={`font-mono text-[11px] ${cellSelected('units', ri, 0) ? CELL_SEL_CLS : ''}`}
                       >
                         {r.billingDocument}
                       </AdminTd>
@@ -2400,7 +2402,7 @@ export default function WarrantyProvisionPageClient() {
                         {r.material}
                       </AdminTd>
                       <AdminTd
-                        className={`font-mono text-[13px] ${cellSelected('units', ri, 3) ? CELL_SEL_CLS : ''}`}
+                        className={`font-mono text-[11px] ${cellSelected('units', ri, 3) ? CELL_SEL_CLS : ''}`}
                       >
                         {r.serialNumber}
                       </AdminTd>
@@ -2439,7 +2441,7 @@ export default function WarrantyProvisionPageClient() {
                 </tbody>
               </AdminTable>
             </div>
-            <div className="flex shrink-0 items-center justify-between px-1 text-[14px] text-slate-800">
+            <div className="flex shrink-0 items-center justify-between px-1 text-[11px] text-slate-800">
               <label className="flex items-center gap-1.5">
                 Rows
                 <select
@@ -2484,7 +2486,7 @@ export default function WarrantyProvisionPageClient() {
 
         {tab === 'rates' && rates && (
           <div className="min-h-0 flex-1 space-y-3 overflow-auto p-1">
-            <p className="text-[14px] font-medium text-amber-900">
+            <p className="text-[11px] font-medium text-amber-900">
               {rates.assumptionBadge} · Exposure {inr(rates.exposureUnitYears)} unit-years (= SNAP
               Grand Total)
             </p>
@@ -2497,8 +2499,8 @@ export default function WarrantyProvisionPageClient() {
                 ['Avg claim cost', rates.avgClaimCost != null ? inrMoney(rates.avgClaimCost) : '—'],
               ].map(([k, v]) => (
                 <div key={k} className="rounded-lg border border-slate-300 bg-white p-3">
-                  <div className="text-[13px] font-medium text-slate-800">{k}</div>
-                  <div className="text-[18px] font-semibold text-slate-900">{v}</div>
+                  <div className="text-[11px] font-medium text-slate-800">{k}</div>
+                  <div className="text-[11px] font-semibold text-slate-900">{v}</div>
                 </div>
               ))}
             </div>
@@ -2558,28 +2560,28 @@ export default function WarrantyProvisionPageClient() {
         {tab === 'forecast' && (
           <div className="min-h-0 flex-1 space-y-3 overflow-auto p-1">
             <div className="flex flex-wrap items-center gap-2">
-              <label className="flex items-center gap-1.5 text-[14px] text-slate-800">
+              <label className="flex items-center gap-1.5 text-[11px] text-slate-800">
                 Scenario
                 <select
                   value={scenario}
                   onChange={(e) =>
                     setScenario(e.target.value as 'base' | 'optimistic' | 'pessimistic')
                   }
-                  className="h-8 rounded border border-slate-200 px-2 text-[14px]"
+                  className="h-8 rounded border border-slate-200 px-2 text-[11px]"
                 >
                   <option value="base">Base</option>
                   <option value="optimistic">Optimistic</option>
                   <option value="pessimistic">Pessimistic</option>
                 </select>
               </label>
-              <span className="rounded bg-slate-100 px-2 py-1 text-[13px] font-medium text-slate-900">
+              <span className="rounded bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-900">
                 KPIs & table = {scenario === 'base' ? 'Base' : scenario === 'optimistic' ? 'Optimistic' : 'Pessimistic'}
               </span>
               <button
                 type="button"
                 onClick={() => void downloadForecast()}
                 disabled={exporting}
-                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[14px] disabled:opacity-50"
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] disabled:opacity-50"
               >
                 <Download className={`h-3.5 w-3.5 ${exporting ? 'animate-pulse' : ''}`} />
                 {exporting ? 'Preparing…' : 'Download Excel'}
@@ -2599,7 +2601,7 @@ export default function WarrantyProvisionPageClient() {
                     ['Provision gap', inrMoneyExact(forecast.provision.gap)],
                   ].map(([k, v]) => (
                     <div key={k} className="rounded-lg border border-slate-200 bg-white p-3">
-                      <div className="text-[13px] text-slate-900">{k}</div>
+                      <div className="text-[11px] text-slate-900">{k}</div>
                       <div
                         className={`text-sm font-semibold ${
                           k === 'Provision gap' && forecast.provision.gap > 0
@@ -2612,7 +2614,7 @@ export default function WarrantyProvisionPageClient() {
                     </div>
                   ))}
                 </div>
-                <p className="text-[13px] text-slate-900">{forecast.provision.note}</p>
+                <p className="text-[11px] text-slate-900">{forecast.provision.note}</p>
                 <div className="grid gap-2 md:grid-cols-3">
                   {(
                     [
@@ -2625,7 +2627,7 @@ export default function WarrantyProvisionPageClient() {
                       key={id}
                       type="button"
                       onClick={() => setScenario(id)}
-                      className={`rounded-lg border p-3 text-left text-[14px] ${
+                      className={`rounded-lg border p-3 text-left text-[11px] ${
                         scenario === id
                           ? 'border-slate-900 bg-slate-900 text-white'
                           : 'border-slate-200 bg-white hover:border-slate-400'
@@ -2660,7 +2662,7 @@ export default function WarrantyProvisionPageClient() {
                     ))}
                   </tbody>
                 </AdminTable>
-                <details className="rounded border border-slate-200 bg-white p-3 text-[14px]">
+                <details className="rounded border border-slate-200 bg-white p-3 text-[11px]">
                   <summary className="cursor-pointer font-semibold">Methodology & limitations</summary>
                   <ul className="mt-2 list-disc space-y-1 pl-5 text-slate-800">
                     {forecast.methodology.map((m) => (
@@ -2675,7 +2677,7 @@ export default function WarrantyProvisionPageClient() {
                 </details>
               </>
             ) : (
-              <p className="text-[14px] text-slate-900">{loading ? 'Loading…' : 'No forecast'}</p>
+              <p className="text-[11px] text-slate-900">{loading ? 'Loading…' : 'No forecast'}</p>
             )}
           </div>
         )}
@@ -2683,7 +2685,7 @@ export default function WarrantyProvisionPageClient() {
         {tab === 'claims' && (
           <div className="min-h-0 flex-1 space-y-2 overflow-auto p-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[14px] text-slate-900">
+              <span className="text-[11px] text-slate-900">
                 Stored claims
                 {claimsMeta?.syncedAt
                   ? ` · last sync ${formatUiDate(claimsMeta.syncedAt)} · ${claimsMeta.rowCount.toLocaleString('en-IN')} total`
@@ -2696,7 +2698,7 @@ export default function WarrantyProvisionPageClient() {
                   type="button"
                   onClick={() => void resyncClaims()}
                   disabled={loading || claimsResyncing}
-                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[14px] disabled:opacity-50"
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] disabled:opacity-50"
                 >
                   <RefreshCw
                     className={`h-3.5 w-3.5 ${claimsResyncing ? 'animate-spin' : ''}`}
@@ -2714,12 +2716,12 @@ export default function WarrantyProvisionPageClient() {
                   }
                 }}
                 placeholder="Search claim / serial"
-                className="ml-auto h-8 w-48 rounded border border-slate-200 px-2 text-[14px]"
+                className="ml-auto h-8 w-48 rounded border border-slate-200 px-2 text-[11px]"
                 disabled={loading || claimsResyncing}
               />
             </div>
             {!claimsMeta?.syncedAt && !loading ? (
-              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[14px] text-amber-900">
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
                 No synced claims yet
                 {canResyncClaims
                   ? ' — click Resync to build the table from Call Register, ARCP, and MB51.'
@@ -2744,7 +2746,7 @@ export default function WarrantyProvisionPageClient() {
                 {(claims?.rows ?? []).map((c) => (
                   <AdminTr key={c.claimNo || c.id}>
                     <AdminTd>{c.claimNo}</AdminTd>
-                    <AdminTd className="font-mono text-[13px]">{c.serialNumber}</AdminTd>
+                    <AdminTd className="font-mono text-[11px]">{c.serialNumber}</AdminTd>
                     <AdminTd>{c.claimDate ? formatUiDate(c.claimDate) : '—'}</AdminTd>
                     <AdminTd className="max-w-[14rem] truncate" title={c.defectDescription}>
                       {c.defectDescription || '—'}
@@ -2769,7 +2771,7 @@ export default function WarrantyProvisionPageClient() {
               </tbody>
             </AdminTable>
             <div className="flex flex-wrap items-center gap-2 px-1 pb-1">
-              <label className="text-[14px] text-slate-900">
+              <label className="text-[11px] text-slate-900">
                 Rows
                 <select
                   value={claimsPageSize}
@@ -2779,7 +2781,7 @@ export default function WarrantyProvisionPageClient() {
                       Number(e.target.value) as (typeof CLAIMS_PAGE_SIZES)[number]
                     );
                   }}
-                  className="ml-1 h-8 rounded border border-slate-200 px-2 text-[14px]"
+                  className="ml-1 h-8 rounded border border-slate-200 px-2 text-[11px]"
                   disabled={loading}
                 >
                   {CLAIMS_PAGE_SIZES.map((n) => (
@@ -2789,12 +2791,12 @@ export default function WarrantyProvisionPageClient() {
                   ))}
                 </select>
               </label>
-              <span className="text-[14px] text-slate-900">
+              <span className="text-[11px] text-slate-900">
                 Page {claimsPage} / {claimsTotalPages}
               </span>
               <button
                 type="button"
-                className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-[14px] disabled:opacity-40"
+                className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-[11px] disabled:opacity-40"
                 disabled={claimsPage <= 1 || loading}
                 onClick={() => setClaimsPage((p) => Math.max(1, p - 1))}
               >
@@ -2802,7 +2804,7 @@ export default function WarrantyProvisionPageClient() {
               </button>
               <button
                 type="button"
-                className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-[14px] disabled:opacity-40"
+                className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-[11px] disabled:opacity-40"
                 disabled={claimsPage >= claimsTotalPages || loading}
                 onClick={() => setClaimsPage((p) => p + 1)}
               >
@@ -2815,7 +2817,7 @@ export default function WarrantyProvisionPageClient() {
         {tab === 'mismatched' && (
           <div className="min-h-0 flex-1 space-y-2 overflow-auto p-1">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[14px] text-slate-900">
+              <span className="text-[11px] text-slate-900">
                 Stored mismatch · Active WP vs CRM WCO=W · {periodYm}
                 {mismatch?.meta?.syncedAt
                   ? ` · last sync ${formatUiDate(mismatch.meta.syncedAt)}`
@@ -2829,7 +2831,7 @@ export default function WarrantyProvisionPageClient() {
                   type="button"
                   onClick={() => void resyncClaims()}
                   disabled={loading || claimsResyncing}
-                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[14px] disabled:opacity-50"
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] disabled:opacity-50"
                 >
                   <RefreshCw
                     className={`h-3.5 w-3.5 ${claimsResyncing ? 'animate-spin' : ''}`}
@@ -2843,12 +2845,12 @@ export default function WarrantyProvisionPageClient() {
                 disabled={
                   exporting || loading || claimsResyncing || !mismatch?.meta?.syncedAt
                 }
-                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[14px] disabled:opacity-50"
+                className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] disabled:opacity-50"
               >
                 <Download className={`h-3.5 w-3.5 ${exporting ? 'animate-pulse' : ''}`} />
                 {exporting ? 'Preparing…' : 'Download Excel'}
               </button>
-              <label className="ml-auto text-[14px] text-slate-900">
+              <label className="ml-auto text-[11px] text-slate-900">
                 Only in
                 <select
                   value={mismatchOnlyIn}
@@ -2856,7 +2858,7 @@ export default function WarrantyProvisionPageClient() {
                     setMismatchPage(1);
                     setMismatchOnlyIn(e.target.value as '' | 'wp' | 'crm');
                   }}
-                  className="ml-1 h-8 rounded border border-slate-200 px-2 text-[14px]"
+                  className="ml-1 h-8 rounded border border-slate-200 px-2 text-[11px]"
                   disabled={loading || claimsResyncing}
                 >
                   <option value="">All</option>
@@ -2866,7 +2868,7 @@ export default function WarrantyProvisionPageClient() {
               </label>
             </div>
             {!mismatch?.meta?.syncedAt && !loading ? (
-              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[14px] text-amber-900">
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">
                 No synced mismatch yet
                 {canResyncClaims
                   ? ' — click Resync to backfill all months at once.'
@@ -2892,8 +2894,8 @@ export default function WarrantyProvisionPageClient() {
                   <AdminTr key={`${r.onlyIn}-${r.trn}`}>
                     <AdminTd>{r.onlyIn}</AdminTd>
                     <AdminTd>{r.mfgYear || '—'}</AdminTd>
-                    <AdminTd className="font-mono text-[13px]">{r.serial}</AdminTd>
-                    <AdminTd className="font-mono text-[13px]">{r.trn}</AdminTd>
+                    <AdminTd className="font-mono text-[11px]">{r.serial}</AdminTd>
+                    <AdminTd className="font-mono text-[11px]">{r.trn}</AdminTd>
                     <AdminTd className="max-w-[12rem] truncate" title={r.partyName}>
                       {r.partyName || '—'}
                     </AdminTd>
@@ -2908,10 +2910,10 @@ export default function WarrantyProvisionPageClient() {
               </tbody>
             </AdminTable>
             {!loading && !(mismatch?.rows.length) ? (
-              <p className="text-[14px] text-slate-900">No mismatched calls for this filter.</p>
+              <p className="text-[11px] text-slate-900">No mismatched calls for this filter.</p>
             ) : null}
             <div className="flex flex-wrap items-center gap-2 px-1 pb-1">
-              <label className="text-[14px] text-slate-900">
+              <label className="text-[11px] text-slate-900">
                 Rows
                 <select
                   value={mismatchPageSize}
@@ -2921,7 +2923,7 @@ export default function WarrantyProvisionPageClient() {
                       Number(e.target.value) as (typeof MISMATCH_PAGE_SIZES)[number]
                     );
                   }}
-                  className="ml-1 h-8 rounded border border-slate-200 px-2 text-[14px]"
+                  className="ml-1 h-8 rounded border border-slate-200 px-2 text-[11px]"
                   disabled={loading}
                 >
                   {MISMATCH_PAGE_SIZES.map((n) => (
@@ -2931,14 +2933,14 @@ export default function WarrantyProvisionPageClient() {
                   ))}
                 </select>
               </label>
-              <span className="text-[14px] text-slate-900">
+              <span className="text-[11px] text-slate-900">
                 {loading
                   ? '…'
                   : `${mismatchTotal.toLocaleString('en-IN')} rows · Page ${mismatchPage} / ${mismatchTotalPages}`}
               </span>
               <button
                 type="button"
-                className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-[14px] disabled:opacity-40"
+                className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-[11px] disabled:opacity-40"
                 disabled={mismatchPage <= 1 || loading}
                 onClick={() => setMismatchPage((p) => Math.max(1, p - 1))}
               >
@@ -2946,7 +2948,7 @@ export default function WarrantyProvisionPageClient() {
               </button>
               <button
                 type="button"
-                className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-[14px] disabled:opacity-40"
+                className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2 text-[11px] disabled:opacity-40"
                 disabled={mismatchPage >= mismatchTotalPages || loading}
                 onClick={() => setMismatchPage((p) => p + 1)}
               >
@@ -2957,7 +2959,7 @@ export default function WarrantyProvisionPageClient() {
         )}
 
         {tab === 'assumptions' && assumptions && (
-          <div className="max-w-xl space-y-3 overflow-auto p-2 text-[14px]">
+          <div className="max-w-xl space-y-3 overflow-auto p-2 text-[11px]">
             {(
               [
                 ['inflationPct', 'Annual inflation %', 'pct'],
