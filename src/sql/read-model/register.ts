@@ -285,6 +285,19 @@ function registerDateRangeBound(date: string, end = false): string {
   return end ? istDayEndIso(date) : istDayStartIso(date);
 }
 
+/** Office/branch scope: direct id, hot.office_under parent, or dim franchisee→nunder. */
+function registerOfficeScopeSql(paramIdx: number): string {
+  return `(
+      h.nofficeid = ANY($${paramIdx}::bigint[])
+      OR COALESCE(h.office_under, 0) = ANY($${paramIdx}::bigint[])
+      OR EXISTS (
+        SELECT 1 FROM dim_offices o
+        WHERE o.ncode = h.nofficeid
+          AND o.nunder = ANY($${paramIdx}::bigint[])
+      )
+    )`;
+}
+
 export function buildWhere(params: RegisterPostgresParams): { sql: string; values: unknown[] } {
   const clauses: string[] = ['1=1'];
   const values: unknown[] = [];
@@ -297,22 +310,16 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
   }
 
   if (!params.isHod && params.assignedOffices.length > 0) {
-    // Match CRM register: call office in assigned set, or franchisee under an assigned branch.
-    clauses.push(`(
-      h.nofficeid = ANY($${idx}::bigint[])
-      OR EXISTS (
-        SELECT 1 FROM dim_offices o
-        WHERE o.ncode = h.nofficeid
-          AND o.nunder = ANY($${idx}::bigint[])
-      )
-    )`);
+    // Call office, stored parent branch (orphan nofficeid), or dim franchisee→branch.
+    clauses.push(registerOfficeScopeSql(idx));
     values.push(params.assignedOffices.map(Number));
     idx++;
   }
 
   if (params.officeId && params.officeId !== 'All') {
     const offices = params.officeId.split(',').map(Number);
-    clauses.push(`h.nofficeid = ANY($${idx}::bigint[])`);
+    // Same scope as branch filter — officeId lists are often expanded branch ids.
+    clauses.push(registerOfficeScopeSql(idx));
     values.push(offices);
     idx++;
   }
@@ -378,15 +385,8 @@ export function buildWhere(params: RegisterPostgresParams): { sql: string; value
   }
 
   if (params.branch && params.branch !== 'All') {
-    // Match CRM register: branch HQ or franchisee offices under that branch (nunder).
-    clauses.push(`(
-      h.nofficeid = ANY($${idx}::bigint[])
-      OR EXISTS (
-        SELECT 1 FROM dim_offices o
-        WHERE o.ncode = h.nofficeid
-          AND o.nunder = ANY($${idx}::bigint[])
-      )
-    )`);
+    // Branch HQ, stored parent (orphan nofficeid), or dim franchisee→branch (nunder).
+    clauses.push(registerOfficeScopeSql(idx));
     values.push(params.branch.split(',').map(Number));
     idx++;
   }

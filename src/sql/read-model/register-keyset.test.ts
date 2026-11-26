@@ -253,5 +253,12 @@ describe('register composite keyset', () => {
     expect(sql).toContain('o.nunder = ANY');
     expect(values).toEqual(expect.arrayContaining([[8]]));
   });
+
+  it('branch / officeId scope also matches hot.office_under (orphan nofficeid)', () => {
+    const branch = buildWhere(baseParams({ branch: '30' }));
+    expect(branch.sql).toContain('COALESCE(h.office_under, 0) = ANY');
+    const office = buildWhere(baseParams({ officeId: '30,19' }));
+    expect(office.sql).toContain('COALESCE(h.office_under, 0) = ANY');
+  });
 });
 
